@@ -94,7 +94,98 @@ struct WindowPreferences: Codable, Equatable {
     /// ドラッグして、比率を変えて、それを離したときに永続化したい」）
     var assignSidebarWidth: Double?
 
+    /// 切り離した面（ポップアウト）の置き場。キーは `PaneID.rawValue`。
+    /// optional なので導入前の window.json もそのまま読める（2026-09-12）
+    var panes: [String: PanePlacement]?
+
     static let `default` = WindowPreferences(mode: .fullscreen, frame: nil, screenUUID: nil)
+}
+
+/// **サイドバーから切り離せる面**（mako 火花 2026-09-12「別ウィンドウに分けたい
+/// Pane あるんだよな。一枚の広い画面で設定したいやつ。機材の繋げる Editor とか」）。
+///
+/// Track は選択に張り付く面なので対象外。⚠️ raw 値は `window.json` に入る —
+/// `SurfaceTab` と同じく**追加は安全・改名は危険**（テストで固定）
+enum PaneID: String, Codable, CaseIterable {
+    case jack, keystage, lpd8, roto
+
+    init?(surface: SurfaceTab) {
+        switch surface {
+        case .jack: self = .jack
+        case .keystage: self = .keystage
+        case .lpd8: self = .lpd8
+        case .roto: self = .roto
+        case .track: return nil
+        }
+    }
+
+    var surface: SurfaceTab {
+        switch self {
+        case .jack: return .jack
+        case .keystage: return .keystage
+        case .lpd8: return .lpd8
+        case .roto: return .roto
+        }
+    }
+
+    var title: String { surface.title }
+
+    /// 初回に開くときの寸法（Jack は 3 列の結線図が収まる幅）
+    var defaultSize: CGSize {
+        switch self {
+        case .jack: return CGSize(width: 960, height: 560)
+        case .keystage, .lpd8, .roto: return CGSize(width: 720, height: 640)
+        }
+    }
+
+    var minimumSize: CGSize {
+        switch self {
+        case .jack: return CGSize(width: 720, height: 400)
+        case .keystage, .lpd8, .roto: return CGSize(width: 480, height: 400)
+        }
+    }
+}
+
+/// 切り離した面 1 枚の置き場（主ウィンドウの frame / screenUUID と同じ流儀）
+struct PanePlacement: Codable, Equatable {
+    var frame: [Double]?
+    var screenUUID: String?
+    /// 終了時に開いていたか（次回起動で開き直す）
+    var open: Bool
+}
+
+enum PaneWindowPlacement {
+    /// 保存 → 画面の fail-open（保存画面 → 内蔵 → 先頭）→ 枠の押し戻し。
+    /// 保存が無ければ面の既定サイズで画面中央
+    static func resolve(_ saved: PanePlacement?, pane: PaneID, screens: [ScreenInfo])
+        -> WindowLanding?
+    {
+        guard let screen = WindowPlacement.targetScreen(saved?.screenUUID, screens: screens)
+        else { return nil }
+        let visible = screen.visibleFrame
+        let frame: CGRect
+        if let values = saved?.frame, values.count == 4, values[2] > 0, values[3] > 0 {
+            frame = fitting(
+                CGRect(x: values[0], y: values[1], width: values[2], height: values[3]),
+                into: visible, minimum: pane.minimumSize)
+        } else {
+            let size = pane.defaultSize
+            frame = CGRect(
+                x: visible.midX - size.width / 2, y: visible.midY - size.height / 2,
+                width: size.width, height: size.height)
+        }
+        return WindowLanding(screenUUID: screen.uuid, frame: frame, fullscreen: false)
+    }
+
+    /// `WindowPlacement.fitting` の最小サイズ可変版
+    static func fitting(_ frame: CGRect, into visible: CGRect, minimum: CGSize) -> CGRect {
+        let size = CGSize(
+            width: min(max(frame.width, minimum.width), visible.width),
+            height: min(max(frame.height, minimum.height), visible.height))
+        let x = min(max(frame.minX, visible.minX), visible.maxX - size.width)
+        let y = min(max(frame.minY, visible.minY), visible.maxY - size.height)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
 }
 
 /// 画面 1 枚の素性（純関数に渡すための値型 — AppKit 非依存でテストできる）
@@ -443,6 +534,42 @@ final class WindowPlacementController: ObservableObject {
         } catch {
             NSLog("window prefs save failed: %@", String(describing: error))
         }
+    }
+
+    // MARK: - 切り離した面
+
+    func panePlacement(_ pane: PaneID) -> PanePlacement? {
+        prefs.panes?[pane.rawValue]
+    }
+
+    /// 面のウィンドウの姿を取り込む（移動・リサイズ・開閉）。主ウィンドウと同じく
+    /// 静止後に書く
+    func capturePane(_ pane: PaneID, window: NSWindow, open: Bool) {
+        var placement = prefs.panes?[pane.rawValue] ?? PanePlacement(frame: nil, screenUUID: nil, open: open)
+        let frame = window.frame
+        placement.frame = [frame.minX, frame.minY, frame.width, frame.height]
+        if let screen = window.screen,
+           let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+            as? NSNumber
+        {
+            placement.screenUUID = Self.uuid(of: CGDirectDisplayID(number.uint32Value))
+        }
+        placement.open = open
+        setPane(pane, placement)
+    }
+
+    func setPaneOpen(_ pane: PaneID, _ open: Bool) {
+        var placement = prefs.panes?[pane.rawValue] ?? PanePlacement(frame: nil, screenUUID: nil, open: open)
+        placement.open = open
+        setPane(pane, placement)
+    }
+
+    private func setPane(_ pane: PaneID, _ placement: PanePlacement) {
+        var panes = prefs.panes ?? [:]
+        guard panes[pane.rawValue] != placement else { return }
+        panes[pane.rawValue] = placement
+        prefs.panes = panes
+        scheduleSave()
     }
 
     // MARK: - 設定 UI から

@@ -209,6 +209,15 @@ struct ContentView: View {
                         Text("面")
                             .font(LadylandFont.bodyBold)
                         surfaceTabs
+                        // 面を別ウィンドウへ（広い画面で設定する。mako 火花 2026-09-12）
+                        if let pane = PaneID(surface: assignTab) {
+                            Button { appState.panes.open(pane, appState: appState) } label: {
+                                Image(systemName: "macwindow.badge.plus")
+                                    .foregroundColor(theme.textSecondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("別ウィンドウで開く")
+                        }
                         Spacer()
                         // ROTO の SMART ページ（⌥←→ と同じ。ROTO 本体の
                         // ボタンは MIDI を送らないので、繰れるのはここだけ）
@@ -240,48 +249,16 @@ struct ContentView: View {
                         .help("rail に畳む")
                     }
                     switch assignTab {
-                    case .keystage:
-                        // 面の責務原則（mako 裁定 2026-08-13/14「Keystage surface を
-                        // 新しく」）: Page の設計は Track 面（InstMatrix + Page 既定）。
-                        // Keystage 面は**機材の受け方 = 演奏** — ARP / CHORD /
-                        // テンポ同期 / ボタン焼き。割当パネル（KnobAssignPanel）は
-                        // ここから退いた（LPD8 タブには残る — あちらは面が 8 ノブで
-                        // マトリクスが要らない）
-                        KeystageSettingsView()
-                    case .lpd8:
-                        KnobAssignPanel(
-                            slot: appState.rack.drumSlot,
-                            surface: .lpd8(knobCCs: appState.lpd8KnobCCs.map(Int.init)),
-                            onChanged: { appState.knobMappingsChanged() },
-                            onSetDefault: {
-                                appState.rememberDefault(on: appState.rack.drumSlot)
-                            },
-                            onLoadDefault: {
-                                appState.loadDefault(on: appState.rack.drumSlot)
-                            },
-                            hasDefault: appState.rack.drumSlot.defaultSnapshot != nil
-                        )
-                        .id(-1)
-                    case .roto:
-                        // ⚠️ **ここは割り当ての面ではない**。ROTO の SMART 面が
-                        // 映すのは**選択中の席の割当**（Keystage タブと同じもの）
-                        // なので、「ROTO の割り当て」というものは存在しない。
-                        // 3 つ並ぶと誤解されるので、1 行で言い切っておく
-                        VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
-                            Text(
-                                "ROTO **本体**の面（色・パレット・埋め方）。\n"
-                                + "SMART 面が映すのは**選択中の席の割り当て**"
-                                + "（Keystage タブで編集）。"
-                            )
-                            .font(LadylandFont.deskCaption)
-                            .foregroundColor(theme.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            RotoSettingsView()
+                    case .keystage, .lpd8, .roto, .jack:
+                        // 機材 3 面 + Jack は**切り離せる**（PaneWindows）。中身は
+                        // SurfaceContent に 1 か所 — サイドバーと別ウィンドウで同じ View
+                        if let pane = PaneID(surface: assignTab) {
+                            if appState.panes.isOpen(pane) {
+                                DetachedPaneStub(pane: pane)
+                            } else {
+                                SurfaceContent(pane: pane)
+                            }
                         }
-                    case .jack:
-                        // Jack 結線図（spec/09 — 機材 → Jack → Track の見取り図。
-                        // 演奏前チェック: いま誰がどこ？が一目）
-                        JackBoardView()
                     case .track:
                         // 席そのもの（名前・カラー・ミュート・gain）— 機材 3 面と
                         // 違い、選択中のトラックのアイデンティティを編集する
@@ -834,7 +811,8 @@ struct ContentView: View {
             && [123, 124, 43, 47].contains(Int(event.keyCode))
         // 設定/Debug ウィンドウが key の間は飲まない — TextField 等の通常入力を
         // 壊さないため（ミキサーが key の時のライブ挙動は従来どおり）
-        if appState.settings.isKeyWindow || appState.debugWindow.isKeyWindow,
+        if appState.settings.isKeyWindow || appState.debugWindow.isKeyWindow
+            || appState.panes.isAnyKeyWindow,
             !isPageStepKey { return false }
         // **テキスト入力中は一切奪わない**（2026-08-04）。
         // 別ウィンドウは上で除いていたが、メインウィンドウ内の

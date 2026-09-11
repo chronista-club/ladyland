@@ -39,6 +39,8 @@ final class AppState: ObservableObject {
     let debugWindow = DebugWindowController()
     /// 起動時のウィンドウ配置 + 以後の追従保存（mako 裁定 2026-08-01）
     let windowPlacement = WindowPlacementController()
+    /// サイドバーから切り離した面（ポップアウト。置き場は window.json）
+    let panes = PaneWindowController()
     private var midi: MIDIInput?
     /// ラック復元中の Task。起動経路が重なっても古い復元を放置しない。
     private var restoreTask: Task<Void, Never>?
@@ -331,6 +333,9 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
         // 表示モードの変化（設定 UI / 緑ボタン / ⌃⌘F）を設定画面へ届ける
         windowPlacement.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        panes.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
@@ -761,6 +766,11 @@ final class AppState: ObservableObject {
         // ここ = ContentView.onAppear はウィンドウが立った後で、生成の
         // タイミング揺れはコントローラ側のリトライが吸収する
         windowPlacement.applyAtLaunch()
+        // 前回開いていた切り離し面は、主ウィンドウの配置（リトライ込み）の後に
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            self.panes.restoreAtLaunch(appState: self)
+        }
 
         do {
             try rack.start()
