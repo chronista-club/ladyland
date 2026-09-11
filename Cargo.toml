@@ -45,7 +45,7 @@ midi-msg = "0.6"
 
 # Video
 video-rs = "0.9"
-ndarray = "0.15"
+ndarray = "0.17"
 
 # Plugin Hosting
 rack = "0.4"
