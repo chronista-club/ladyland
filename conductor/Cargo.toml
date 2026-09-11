@@ -8,7 +8,7 @@ description = "FleetFlow service monitor and auto-restart daemon"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-kdl = "4"
+kdl = "6"
 reqwest = { version = "0.12", features = ["json"] }
 thiserror = "2"
 tracing = "0.1"
