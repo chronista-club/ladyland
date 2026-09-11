@@ -32,6 +32,14 @@ scripts/build-app.sh --reinstall
 （**CLI 直起動（`swift run`）は本番では使わない** — ⌘Q も終了時保存も効かず、TERM 落ちで状態を失った実例がある。
 切り分けで使うときも **必ず `-c release Ladyland`** — `swift run` 単体は RigBench と曖昧でエラー、debug ビルドは負荷の余裕が別物）
 
+**退避路フラグ（CLAUDE.md の `LADYLAND_*=0`）を `.app` に渡すとき**は `launchctl setenv` してから起動する
+（Finder / Spotlight 起動はシェルの環境変数を継承しない）:
+
+```bash
+launchctl setenv LADYLAND_MAIN_LCD 0 && open -a Ladyland
+launchctl unsetenv LADYLAND_MAIN_LCD    # 戻す
+```
+
 起動したら **Console.app（または実行ターミナル）の NSLog で 3 点を確認**:
 
 | ログ | 意味 | 出ないとき |
@@ -90,12 +98,17 @@ LED: LPD8 のパッドがキー・スケールの色（ルート橙 / スケー�
 
 ## 5. ラックのバックアップ（リハ後・本番前に必ず）
 
-```bash
-cp ~/Library/Application\ Support/ladyland/rack.json ~/Desktop/rack-$(date +%m%d).json
-```
+動いている状態の SSOT は **`ladyland.sqlite`**（2026-08-02 に rack.json から移行。
+同じフォルダに残っている `rack.json` は移行前の控えで、もう更新されない）。控えは 2 通り:
 
-楽器構成 + 音色 (fullState) + 音量 + 顔つまみ割当 + 出力デバイス + キー/LED 設定の
-全部がこの 1 ファイル。壊れた場合は逆コピーで復旧 → 再起動。
+- **持ち出す姿**: 設定 → スナップショット → 「スナップショットを書き出す…」（音色を含める）。
+  `lldata-snapshot-{日付}.kdl` 1 ファイルにセット一式が入り、読み込みは席ごとの部分ロード。
+  **起動したまま取れる**ので、リハ後はまずこれ
+- **丸ごと**: Cmd+Q で終了してから（§6）
+  ```bash
+  cp ~/Library/Application\ Support/ladyland/ladyland.sqlite ~/Desktop/ladyland-$(date +%m%d).sqlite
+  ```
+  壊れた場合は逆コピーで復旧 → 再起動。動作中のコピーは避ける（書き込みの途中を写す）
 
 **LPD8 本体のバックアップ**（実機側の設定はこのファイルに入らない）:
 設定 → LPD8 → 読み込み → プリセット名を付けて保存。
@@ -114,5 +127,16 @@ Cmd+Q（終了時に LED 全消灯 → 自動保存の順。`rack saved:` ログ
 - [ ] LED: 持ち替えで対象パッドが白 flash / LPD8 演奏で明滅 / キルスイッチで即消灯
 - [ ] エディタでライブ用 4 プログラムを読んでプリセット保存（= 実機バックアップ）
 - [ ] Realtime フィルタの実機確認（Keystage の MIDI Clock が悪影響を与えないこと — 入力段で遮断済みのはず）
-- [ ] レイテンシ体感（鍵盤 → L6max 出音。気になるなら design/06 §7 のバッファ調整へ）
+- [ ] レイテンシ実測（体感ではなく数字で残す。L6max を挿した状態で、ターミナルから — 初回はマイク権限のダイアログが出る）:
+      ```bash
+      cd ~/repos/ladyland/ladyland
+      swift run RigBench audio-latency             # 予算: 2026-09-12 手元で 出力 11.25 ms / 入力 13.75 ms（512 frames @ 48k）
+      swift run RigBench audio-latency --loopback  # 往復の実測（クリックが鳴る。USB 1/2 点灯・CH7 を上げておく）
+      ```
+      往復の中央値と「出音まで ≈ 往復 − 入力予算」を docs/l6max/README.md §7 のレイテンシ行に書き足す
+- [ ] render の実測値を残す（普段は静かなので、リハでだけ全部出す）:
+      ```bash
+      launchctl setenv LADYLAND_RENDER_STATS_ALL 1 && open -a Ladyland
+      launchctl unsetenv LADYLAND_RENDER_STATS_ALL    # リハ後に戻す
+      ```
 - [ ] リハ後に §5 のバックアップ

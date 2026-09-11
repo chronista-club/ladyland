@@ -146,6 +146,14 @@ LADYLAND_BENCH=1 swift test -c release --filter RenderBenchTests
 
 **すべて既定 on。`=0` で切る。** 当日フラグを思い出す必要がある状況＝
 何かが壊れている状況なので、**探し回らずに済むようここへ集めてある**。
+
+⭐ **本番の `.app` にフラグを渡すには `launchctl setenv`**（Finder / Spotlight 起動は
+シェルの環境変数を継承しない。`open` 経由で届くことは 2026-09-12 に実測済み）:
+
+```bash
+launchctl setenv LADYLAND_MAIN_LCD 0 && open -a Ladyland   # 付けて起動
+launchctl unsetenv LADYLAND_MAIN_LCD                       # 戻す（次回起動から）
+```
 ⚠️ `=0` 系の退避路を足したら **`scripts/test-matrix.sh` の ESCAPE_HATCHES にも足す**
 （マトリクスのモード 2 = 退避路すべて 0 の検証がズレる）。
 

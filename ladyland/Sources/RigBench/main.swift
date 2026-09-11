@@ -23,6 +23,7 @@ let benches: [Bench] = [
     RotoAdminProbe(),
     AuParams(),
     FftBackendBench(),
+    AudioLatency(),
 ]
 
 let args = Array(CommandLine.arguments.dropFirst())
