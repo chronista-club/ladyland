@@ -554,7 +554,7 @@ dependencies = [
  "crossbeam-channel",
  "rustfft",
  "symphonia",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -565,7 +565,7 @@ dependencies = [
  "cortex-types",
  "knuffel",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -584,7 +584,7 @@ dependencies = [
  "cortex-types",
  "glyphon",
  "ndarray",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tracing",
  "video-rs",
  "wgpu",
@@ -600,7 +600,7 @@ dependencies = [
  "crossbeam-channel",
  "midi-msg",
  "midir",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -612,7 +612,7 @@ dependencies = [
  "cortex-types",
  "crossbeam-channel",
  "rack",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -622,7 +622,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
