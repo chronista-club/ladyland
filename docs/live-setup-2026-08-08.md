@@ -23,11 +23,14 @@
 ## 2. 起動と起動時チェック
 
 ```bash
-cd ~/repos/bikeboy-ladyland/ladyland
-swift run -c release Ladyland
+# 本番は /Applications の Ladyland.app から（Spotlight で "Ladyland"）。
+# 直前にコードを触ったなら、積み込みは必ず --reinstall（終了 → release ビルド → 差し替え → 起動）
+cd ~/repos/ladyland
+scripts/build-app.sh --reinstall
 ```
 
-（`swift run` 単体は RigBench 追加以降エラーになる — **必ず `Ladyland` を付ける**。**本番は必ず `-c release`** — debug ビルドは最適化なしで負荷の余裕が別物）
+（**CLI 直起動（`swift run`）は本番では使わない** — ⌘Q も終了時保存も効かず、TERM 落ちで状態を失った実例がある。
+切り分けで使うときも **必ず `-c release Ladyland`** — `swift run` 単体は RigBench と曖昧でエラー、debug ビルドは負荷の余裕が別物）
 
 起動したら **Console.app（または実行ターミナル）の NSLog で 3 点を確認**:
 

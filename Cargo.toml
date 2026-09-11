@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Makoto"]
 license = "Apache-2.0"
-repository = "https://github.com/chronista-club/bikeboy-ladyland"
+repository = "https://github.com/chronista-club/ladyland"
 
 [workspace.dependencies]
 # Core

@@ -26,11 +26,11 @@ workflow は `.github/workflows/ci.yml`、検証内容は `scripts/test-matrix.s
 ```bash
 mkdir -p ~/actions-runner && cd ~/actions-runner
 # 最新の actions-runner-osx-arm64 を https://github.com/actions/runner/releases から取得して tar xzf
-TOKEN=$(gh api -X POST repos/chronista-club/bikeboy-ladyland/actions/runners/registration-token --jq .token)
-./config.sh --url https://github.com/chronista-club/bikeboy-ladyland --token "$TOKEN" --name makomac --unattended
+TOKEN=$(gh api -X POST repos/chronista-club/ladyland/actions/runners/registration-token --jq .token)
+./config.sh --url https://github.com/chronista-club/ladyland --token "$TOKEN" --name makomac --unattended
 ./svc.sh install && ./svc.sh start
 ```
 
-確認: `gh api repos/chronista-club/bikeboy-ladyland/actions/runners --jq '.runners[] | "\(.name) \(.status)"'` が `makomac online` を返すこと。
+確認: `gh api repos/chronista-club/ladyland/actions/runners --jq '.runners[] | "\(.name) \(.status)"'` が `makomac online` を返すこと。
 
 撤去: `./svc.sh stop && ./svc.sh uninstall && ./config.sh remove --token <除去トークン>`

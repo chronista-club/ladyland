@@ -1,9 +1,10 @@
-# bikeboy-ladyland プロジェクト
+# ladyland プロジェクト
 
 LPD8 MIDIコントローラーを活用したワークスペース管理ツール + オーディオ・ビジュアル・デバイス統合コントロールシステム。
 
 > **Ladyland** = バンド Bikeboy Experience と、その楽器たち（electric ladies）が住むスタジオ。
-> 命名は『Electric Ladyland』へのオマージュ（旧 repo 名: bikeboy、2026-07-23 リネーム）。
+> 命名は『Electric Ladyland』へのオマージュ（旧 repo 名: bikeboy → bikeboy-ladyland、2026-07-23 リネーム）。
+> 2026-09-11 に公開リポジトリ `chronista-club/ladyland` として OSS 化（Apache-2.0、履歴なしで移設。旧私有リポは残置）。
 
 ## ⚡ 現在の主戦場: `ladyland/`（Swift アプリ、2026-07-30 裁定）
 
@@ -49,7 +50,7 @@ feature/* ──PR──→ nightly（開発の先端）──マージ──→
 ## プロジェクト構造
 
 ```
-bikeboy-ladyland/
+ladyland/
 ├── ladyland/                  # ⚡ 8/8 ライブ用 Swift アプリ（主戦場。design/06）
 ├── bikeboy-launcher/          # Swift製macOSアプリ（MIDIコントローラー連携）
 ├── bikeboy-mcp/               # MCP (Model Context Protocol) サーバー（Bun + TypeScript）
