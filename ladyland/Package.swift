@@ -78,7 +78,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LadylandTests",
-            dependencies: ["Ladyland", "Lpd8Kit", "KeystageKit"],
+            dependencies: ["Ladyland", "Lpd8Kit", "KeystageKit", "RigBench"],
             path: "Tests/LadylandTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
