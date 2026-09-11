@@ -21,8 +21,16 @@ xcrun notarytool store-credentials "ladyland" \
 
 ```bash
 scripts/build-app.sh --dist
-# → dist/Ladyland-0.1.0.dmg
+# → dist/Ladyland-v0.1.0.dmg
+
+scripts/build-app.sh --publish
+# → 同じことをして、その tag の GitHub Release に DMG を添付する
+#    （Release が無ければ作る。HEAD が tag の上・作業ツリーが clean・gh 認証済み、が前提）
 ```
+
+リリースの流れは `release` スキル（nightly → main、tag、GitHub Release）のあとに
+`git checkout main && scripts/build-app.sh --publish`。受け取る側は Release ページの
+`Ladyland-vX.Y.Z.dmg` を落として /Applications へ入れるだけ。
 
 中でやっていること:
 
