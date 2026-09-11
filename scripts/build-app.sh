@@ -34,7 +34,7 @@
 # 公証には資格情報の登録が一度だけ必要（対話。ここでは実行しない）:
 #   xcrun notarytool store-credentials "ladyland" \
 #       --apple-id <Apple ID> --team-id 3EQKG4B352 --password <アプリ用パスワード>
-#   ※ アプリ用パスワードは appleid.apple.com → サインインとセキュリティ で発行
+#   ※ アプリ用パスワードは account.apple.com → サインインとセキュリティ で発行
 #
 # 対象は **arm64 のみ**（mako 裁定 2026-08-02）。Intel Mac では動かない。
 
@@ -199,7 +199,7 @@ if [ "$MAKE_DIST" = "1" ]; then
       --team-id 3EQKG4B352 \\
       --password <アプリ用パスワード>
 
-  ※ アプリ用パスワードは appleid.apple.com → サインインとセキュリティ →
+  ※ アプリ用パスワードは account.apple.com → サインインとセキュリティ →
      アプリ用パスワード で発行します（Apple ID 本体のパスワードではありません）
 
 登録後にもう一度 scripts/build-app.sh --dist を実行してください。
@@ -228,6 +228,14 @@ GUIDE
     hdiutil create -volname "Ladyland" -srcfolder "$STAGE" -ov -format UDZO "$DMG" \
         >/dev/null
     rm -rf "$(dirname "$STAGE")"
+
+    # DMG 自体も署名 → 公証 → staple する。中の .app だけでは
+    # `spctl -t install` が "no usable signature" で DMG を蹴る（実測 2026-09-12、v0.1.0）
+    echo "==> DMG を署名して公証へ提出"
+    codesign --sign "$IDENTITY" --timestamp "$DMG" 2>&1 | sed 's/^/    /'
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 | sed 's/^/    /'
+    xcrun stapler staple "$DMG" 2>&1 | sed 's/^/    /'
+    spctl -a -t install "$DMG" 2>&1 | sed 's/^/    /' || { echo "DMG の検証に失敗" >&2; exit 1; }
 
     echo "==> 配布物ができました"
     echo "    $DMG"
