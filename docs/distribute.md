@@ -13,7 +13,7 @@ xcrun notarytool store-credentials "ladyland" \
     --password <アプリ用パスワード>
 ```
 
-**アプリ用パスワード**は appleid.apple.com → サインインとセキュリティ → アプリ用パスワード
+**アプリ用パスワード**は account.apple.com → サインインとセキュリティ → アプリ用パスワード
 で発行する（Apple ID 本体のパスワードではない）。証明書は
 `Developer ID Application: Anycreative Inc. (3EQKG4B352)` を使う — 既に手元にある。
 
@@ -32,6 +32,7 @@ scripts/build-app.sh --dist
 4. **公証へ提出して結果を待つ**（数分）
 5. **staple** — 結果をアプリ本体に貼る。相手がオフラインでも検証が通る
 6. **DMG** — 「Applications へドラッグ」の見慣れた形にする
+7. **DMG も署名 → 公証 → staple**（中の .app だけだと Gatekeeper の `-t install` 検証で蹴られる）
 
 ## なぜ公証が要るのか
 
