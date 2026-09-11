@@ -1,0 +1,214 @@
+// =============================================================================
+// spec/05 — 永続化の SSOT（SQLite / GRDB）
+//
+// spec = Why の層: 「なぜ SQLite なのか、なぜこの分割・この不変条件なのか」。
+// How（実装）は ladyland/Sources/Ladyland/Audio/RackDatabase.swift に住み、
+// 実行可能な正はコード + RackDatabaseTests（Living Documentation）。
+//
+// 凡例（spec/04 の語彙に倣う）:
+//   layer   仕様の階層: store（入れ物）/ schema（表）/ lifecycle（運用）
+//   table   テーブル 1 つ
+//   column  列
+//   fact    実測・実地で確定した事実
+//   rule    設計帰結 — 事実から導かれる「こうしなければならない」
+//   open    未裁定
+//
+// 経緯（2026-08-01〜02）:
+//   ① rack.json（単一 JSON）が 21MB に育ち、音量ノブ 1 回の変更でも全体を
+//      再エンコードして書き直していた
+//   ② .llw（パッケージ + 内容アドレス blob、DB なし）案を検討し spec に起こした
+//   ③ **mako 裁定 2026-08-02「GRDB 導入しよう。ここが SSOT」** で DB に決定。
+//      ②の「内容アドレスの不変 blob」という核は SQLite の中へ持ち込んだ
+// =============================================================================
+
+spec "ladyland-persistence" version="1.0.0" status="implemented" {
+    namespace "club.chronista.ladyland.persistence"
+
+    store "SQLite" via="GRDB 7.x" path="~/Library/Application Support/ladyland/ladyland.sqlite"
+
+    // =========================================================================
+    // 第 1 層: 入れ物 — なぜ SQLite / GRDB なのか
+    // =========================================================================
+    layer "store" {
+
+        // 21MB の実体はほぼ AU fullState の不透明バイナリだった。
+        // DB に期待した利点は 1 つ = **部分書き込み**（変わった行だけ触る）
+        fact "size-is-blobs" measured="2026-08-01" {
+            rack-json-size "21MB"
+            composition "ほぼ全部が AU fullState（100KB〜3MB / スロット）"
+        }
+
+        // 実測（2026-08-02、実データ 22 スロット）
+        fact "migration-result" measured="2026-08-02" {
+            legacy-json "21MB"
+            sqlite-after-import "16MB"   // JSON の base64 が生バイトになる分
+            slots 22
+            drafts 17
+            live-blobs "39 参照 → 重複排除で 39 行 / 15MB"
+        }
+
+        // GRDB を選ぶ理由 — 「競合を解決せず存在させない」に構造として乗る
+        rule "grdb-for-serialized-access" {
+            detail "生の接続を渡さない設計。DatabaseQueue が書き込みを直列化する = 自前のロックが 1 つも要らない"
+            detail "値型 struct がそのままレコード（InstrumentRack との往復が素直）"
+            detail "移行は明示的・順序付きで、適用済みかを DB 自身が覚える"
+            detail "SQL が見える = 何がいつ起きるか追える（ライブ機材で効く性質）"
+        }
+        // 採らなかったもの（判断が揺り戻さないよう残す）
+        rule "not-chosen" {
+            detail "SurrealDB (rocksdb) — Swift から embedded にはサイドカーか C ブリッジが要る = ライブ中の部品と失敗モードが増える"
+            detail "SwiftData / Core Data — 複雑さの大半が複数コンテキストのマージ競合対策。ここに競合は存在しないので払い損"
+        }
+    }
+
+    // =========================================================================
+    // 第 2 層: 表 — 何をどう分けるか
+    // =========================================================================
+    layer "schema" migration="v1-rack" {
+
+        table "rackState" cardinality="単一行" {
+            column "id" type="integer" pk=#true check="id = 1"
+            column "trackCount" type="integer"
+            column "selected" type="integer"
+            column "outputDeviceUID" type="text?"
+            column "keyRoot" type="integer?"
+            column "keyScale" type="text?"
+            column "ledFeedback" type="boolean?"
+        }
+
+        table "blob" role="音色の実体（AU fullState）" {
+            column "hash" type="text" pk=#true   // sha256（CryptoKit）
+            column "data" type="blob"
+            column "byteCount" type="integer"
+
+            // 内容アドレス = 同じ中身は 1 行しか存在しない。
+            // 席と棚 3 着が同じ音色なら実体は 1 個（自動で重複排除）
+            rule "content-addressed"
+            // 一度書いたら書き換えない（INSERT OR IGNORE のみ）。
+            // 上書きが存在しないので競合も存在しない
+            rule "write-once-immutable"
+        }
+
+        table "slot" role="席（ロード済みのみ）" {
+            column "slotIndex" type="integer" pk=#true
+            column "componentType" type="integer"
+            column "componentSubType" type="integer"
+            column "componentManufacturer" type="integer"
+            column "name" type="text"
+            column "gain" type="double"
+            column "stateHash" type="text?" references="blob"
+            // 割当は数十件の小さい配列。行にせず JSON 1 列に畳む —
+            // 席を 1 行で読み書きできる = 部分書き込みの単位を揃える
+            column "knobs" type="text?" encoding="json"
+
+            // ドラム席は「index = トラック総数」規約（design/06 §8）。
+            // 総数 8 / 16 時代の rack.json を読めた仕組みをそのまま持ち越す
+            rule "drum-index-equals-track-count"
+        }
+
+        table "draft" role="席の棚（design/06 §8 Track Drafts）" {
+            column "id" type="text" pk=#true          // UUID
+            column "slotIndex" type="integer" indexed=#true
+            column "componentType" type="integer"
+            column "componentSubType" type="integer"
+            column "componentManufacturer" type="integer"
+            column "name" type="text"
+            column "gain" type="double"
+            column "stateHash" type="text?" references="blob"
+            column "knobs" type="text?" encoding="json"
+            column "savedAt" type="datetime"
+
+            // slot と同じ blob を参照できる = 同じ音色の draft は容量ゼロ
+            rule "shares-blobs-with-slot"
+        }
+
+        // 既存の移行は二度と書き換えない。追加は必ず新しい登録として足す
+        rule "migrations-are-append-only"
+    }
+
+    // =========================================================================
+    // 第 3 層: 運用 — 誰がいつ書くか
+    // =========================================================================
+    layer "lifecycle" {
+
+        // 競合を「解決」せず存在させない構造（mako 裁定 2026-08-01
+        // 「データアクセスをチョッパヤかつ、並行性の競合は気にしたくない」）
+        rule "no-conflict-by-construction" {
+            detail "演奏中の正はメモリの InstrumentRack。DB を読むのは起動時の 1 回だけ → read/write 競合が原理的に起きない"
+            detail "書き手は DatabaseQueue 1 本（GRDB が直列化を保証）"
+            detail "blob は不変・内容アドレスなので上書き競合が無い"
+        }
+
+        // 二層保存は**維持**する。fullState を AU に問い合わせるコストは
+        // 保存層と無関係で安くならない（design/06 §8「パツパツ」の真犯人）
+        save-tier "light" trigger="選択 / 音量 / 並び替え / 割当 など 18 経路" {
+            writes "目録の行だけ（rackState / slot / draft）"
+            touches-au #false
+            touches-blobs #false
+            // blob を書いていないので stateHash を NULL で上書きしてはいけない。
+            // 踏むと再起動で音色が消える（テストで固定）
+            rule "must-preserve-state-hash"
+        }
+        save-tier "heavy" trigger="プラグイン画面を閉じた / 30 秒タイマー / 終了時" {
+            writes "目録 + blob（内容アドレスで追記）"
+            touches-au #true
+            rule "collect-orphans-in-same-transaction"
+        }
+
+        // ⚠️ 実測で判明した重要な事実 — 設計を 1 つ覆した
+        fact "au-fullstate-churns" measured="2026-08-02" rig="M5 MacBook Air / KORG Gadget" {
+            observation "AU は中身が変わっていなくても fullState のバイト列を変えて返すことがある（内部カウンタ等）"
+            impact "内容アドレスなので毎回 新 blob が積まれ、**重い保存 2 回で 9MB の孤児**が出た"
+            extrapolation "30 秒タイマー × 40 分のセット = 80 回 → 数百 MB"
+        }
+        // 帰結: 当初「GC は起動時だけ」（ライブ中にファイルを触らない原則）と
+        // したが、それでは本番中に肥り続ける。行の DELETE はファイル操作ではなく
+        // 同じ直列キュー内の安い書き込みなので、重い保存のたびに回収してよい
+        rule "gc-on-every-heavy-save" supersedes="gc-at-launch-only"
+        // ただし SQLite は DELETE でファイルを縮めない（空きページの再利用）。
+        // 実際に縮める VACUUM は全体書き直しなので**起動時だけ**
+        rule "vacuum-at-launch-only"
+
+        // 旧 JSON 時代の回避策は不要になった（どれも「巨大ドキュメントを
+        // 丸ごと書き直す」ことの副作用だった）
+        rule "retired-workarounds" {
+            detail "バイト列比較の dedup（行単位なら変更点しか触らない）"
+            detail "saveGeneration の追い越しガード（DatabaseQueue が順序を保証）"
+            detail "detached task でのエンコード（巨大なエンコードが無い）"
+        }
+
+        // 移行: 起動時に DB が空で rack.json があれば取り込む。
+        // **rack.json は消さない** — 後戻りできる状態を残す（8/8 を挟む変更）
+        migration from="rack.json" to="ladyland.sqlite" {
+            rule "one-way-once"          // DB に行が入っていれば二度と取り込まない
+            rule "keep-source-untouched"
+        }
+
+        // DB が開けなくても**演奏は続行**する（保存なし。音を止めない方が正しい）
+        rule "fail-open-on-open-failure"
+
+        // 持ち出す姿 = lldata スナップショット（mako 要望 2026-08-02。
+        // 上の open "backup" への答え）。DB は**動いている状態の SSOT**、
+        // こちらは**人が読めて席ごとに拾える控え**、と役割を分ける
+        export "lldata" file="lldata-snapshot-{yyyy-MM-dd-HHmm}.kdl" {
+            rule "self-describing"     // schema ノードが読み方を同梱する
+            rule "content-addressed-blobs"  // 同じ音色の base64 は 1 回だけ
+            rule "partial-load-by-slot"     // 席 1 ノード = 部分ロードの単位
+            rule "refuse-newer-version"     // 知らない版は開かない（半端に適用しない）
+            rule "confirm-before-apply"     // 中身を見せて選ばせてから入れる
+            // 音色を外すと構造だけの軽いファイル（差分向き）
+            option "structure-only"
+            // Swift に成熟した KDL パーサが無い（2026-08-02 調査）ため、
+            // **自分が書き出した部分集合だけを読む**最小パーサを同梱する
+            // （KDLMini。知らない構文は黙って無視せずエラーにする）
+            fact "no-swift-kdl-parser" measured="2026-08-02"
+            fact "real-data" measured="2026-08-02" {
+                slots 22
+                blobs 39
+                size "21MB（base64 込み）"
+                round-trip "実ファイルで往復・部分ロードを確認"
+            }
+        }
+        open "vacuum-threshold" question="起動時 VACUUM を常に走らせるか、孤児が一定量を超えたときだけにするか"
+    }
+}

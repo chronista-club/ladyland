@@ -1,0 +1,105 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cortex-types",
+"crates/cortex-audio",
+    "crates/cortex-gpu",
+    "crates/cortex-midi",
+    "crates/cortex-config",
+    "crates/cortex-plugin",
+    "crates/cortex-device",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Makoto"]
+license = "Apache-2.0"
+repository = "https://github.com/chronista-club/bikeboy-ladyland"
+
+[workspace.dependencies]
+# Core
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async
+tokio = { version = "1.0", features = ["full"] }
+crossbeam-channel = "0.5"
+
+# Audio
+cpal = "0.15"
+symphonia = { version = "0.5", features = ["all"] }
+rustfft = "6.2"
+
+# Graphics
+wgpu = "28.0"
+glyphon = "0.10"
+winit = "0.30"
+bytemuck = { version = "1.14", features = ["derive"] }
+
+# MIDI
+midir = "0.10"
+midi-msg = "0.6"
+
+# Video
+video-rs = "0.9"
+ndarray = "0.15"
+
+# Plugin Hosting
+rack = "0.4"
+
+# Config
+knuffel = "3.2"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# Internal crates
+cortex-types = { path = "crates/cortex-types" }
+cortex-audio = { path = "crates/cortex-audio" }
+cortex-gpu = { path = "crates/cortex-gpu" }
+cortex-midi = { path = "crates/cortex-midi" }
+cortex-config = { path = "crates/cortex-config" }
+cortex-plugin = { path = "crates/cortex-plugin" }
+cortex-device = { path = "crates/cortex-device" }
+
+[[bin]]
+name = "cortex"
+path = "src/main.rs"
+
+# 機材点検ツール（本番前のリグ確認用）
+[[bin]]
+name = "rigcheck"
+path = "src/bin/rigcheck.rs"
+
+[package]
+name = "bikeboy-cortex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "cortex"
+
+[features]
+default = []
+ffmpeg = ["cortex-gpu/ffmpeg"]
+
+[dependencies]
+cortex-types = { workspace = true }
+cortex-audio = { workspace = true }
+cortex-gpu = { workspace = true }
+cortex-midi = { workspace = true }
+cortex-config = { workspace = true }
+cortex-plugin = { workspace = true }
+cortex-device = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+crossbeam-channel = { workspace = true }
+pollster = "0.4"
+chrono = "0.4"

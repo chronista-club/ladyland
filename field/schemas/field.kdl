@@ -1,0 +1,42 @@
+// Field プロトコル（spec/08 / design/07 §3）。
+// ladyland（楽器の供給者）と Vision Pro（降り立つ目）は同格のクライアント —
+// role で見分ける。entities は v0 では json（形が固まったら型で書き下ろす —
+// lpd8-mk2-unison.kdl / page-defaults.schema.kdl と同じ「まず動かす」流儀）。
+//
+// entity の形（v0）:
+//   { "id": 1-64, "name": "Montreal", "color": "#RRGGBB" | null,
+//     "selected": true, "level": 0.0-1.0 }
+
+protocol "field" version="0.1.0" {
+    namespace "ladyland.field"
+
+    channel "presence" from="client" lifetime="persistent" {
+        // 降り立つ / 楽器を供給する。応答は現在の場のスナップショット —
+        // Join した瞬間から場が見える（次の tick を待たない）
+        request "Join" description="Enter the field. role = instruments (ladyland) | visitor (Vision Pro)." {
+            field "role" type="string" required=#true
+            returns "FieldSnapshot" {
+                field "entities" type="json" required=#true
+                // fieldd の版（pkg+ビルド時刻）— Ladyland が同梱版と突き合わせ、
+                // 不一致なら Shutdown → 新版 spawn（自動アプデ）
+                field "server_version" type="string"
+            }
+        }
+
+        // 入れ替えのための退場（自動アプデ経路。v0 は LAN 前提・認証なし）
+        request "Shutdown" description="Ask the running fieldd to exit (binary swap during update)." {
+            returns "Bye" {}
+        }
+
+        // ladyland → field: スロットの姿（名前・色・選択・レベル）
+        request "UpdateEntities" description="Supply the current shape of the instruments (ladyland only)." {
+            field "entities" type="json" required=#true
+            returns "Ack" {}
+        }
+
+        // field → 全購読者: 場の鼓動（30Hz、変化がなくても 1s ハートビート）
+        event "FieldTick" {
+            field "entities" type="json" required=#true
+        }
+    }
+}

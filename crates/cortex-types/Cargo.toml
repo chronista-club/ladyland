@@ -1,0 +1,12 @@
+[package]
+name = "cortex-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core data types for bikeboy-cortex"
+
+[dependencies]
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+serde = { workspace = true }

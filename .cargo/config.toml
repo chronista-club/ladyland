@@ -1,0 +1,11 @@
+[build]
+# macOS リンカーのシンボル名長問題を回避
+rustflags = ["-C", "symbol-mangling-version=v0"]
+
+[env]
+# FFmpegのpkg-configとヘッダファイルのパス (Homebrew)
+PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
+FFMPEG_DIR = "/opt/homebrew"
+FFMPEG_INCLUDE_DIR = "/opt/homebrew/include"
+FFMPEG_LIB_DIR = "/opt/homebrew/lib"
+BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/include"

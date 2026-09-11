@@ -1,0 +1,14 @@
+[package]
+name = "cortex-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KDL preset loading and management"
+
+[dependencies]
+cortex-types = { workspace = true }
+knuffel = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

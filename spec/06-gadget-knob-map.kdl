@@ -1,0 +1,182 @@
+// =============================================================================
+// spec/06 — Korg Gadget つまみ配置（KORG Gadget × ladyland のノブマトリクス）
+//
+// spec = Why の層: 「なぜこのパラメータをこの位置に置くのか」を固定する。
+// How（実装）は ladyland/Sources/Ladyland/GadgetKnobMap.swift に住み、
+// 実行可能な正はコード + RigBench の実機解剖（Living Documentation）。
+//
+// 凡例:
+//   gadget    Gadget 1 機種。au-name= AU の表示名 / params= AU が公開する総数
+//   page      ノブ 8 本ぶんの面（P1 = ROTO の 1 画面 = Keystage の 1 ページ）
+//   knob      1 つまみ。at= ページ内の位置 1-8 / param= AU のパラメータ名
+//   wheel     物理コントローラが担当する枠（マトリクスには並べない）
+//   fact      実機測定で確定した事実。measured= 測定日
+//   rule      設計帰結
+//
+// 出典: RigBench gadget-map（2026-08-04 実機解剖、34 機種）+
+//       ラック実データとの突合（8 席で計 130 個の割当漏れを検出）
+// =============================================================================
+
+spec "gadget-knob-map" version="0.1.0" {
+    namespace "club.chronista.ladyland.gadget"
+
+    // =========================================================================
+    // 事実 — 実機から取った制約
+    // =========================================================================
+
+    // Gadget は先頭 3 つをホイール類に充てる。ノブに並べる必要が無い
+    // （address の連続性から割当漏れを判定できない理由でもある）
+    fact "wheel-first" measured="2026-08-04" {
+        wheel "Pitch Bend" cc=128 note="擬似 Ctrl。PB ホイールが担当"
+        wheel "Modulation Wheel" cc=1
+        wheel "Damper" cc=64 note="pedalMode=keep のときは予約"
+        note "全 34 機種のうち 0-3 個。Fairbanks/Tokyo/Memphis 等は 0 個"
+    }
+
+    // AU が公開しないパラメータがある — ホストからは原理的に触れない
+    fact "unpublished-params" measured="2026-08-04" {
+        example gadget="Firenze (Clav)" param="PICKUP" \
+            note="GUI にはつまみがあるが AU のパラメータツリーに無い"
+        rule "触れないものは spec にも書かない。プラグイン画面で操作する"
+    }
+
+    // パラメータ数は機種で 2 桁違う。マトリクス 128 セルに収まらない機種がある
+    fact "param-count-range" measured="2026-08-04" {
+        smallest gadget="Milpitas (Wavestation)" params=8
+        largest gadget="Recife (Drum)" params=196
+        over-matrix "Recife (Drum)" "Abu Dhabi (Slicer)" "Bilbao (Sampler)" \
+            note="128 セルを超える。全部は載らない"
+    }
+
+    // =========================================================================
+    // 規則 — 配置の考え方
+    // =========================================================================
+
+    rule "p1-is-performance" {
+        note "P1（ROTO の 1 画面目）には**演奏中に触るもの**を置く。"
+        note "音を作るためのパラメータは後ろのページで良い —"
+        note "ライブ中に届く範囲は実質 P1 の 8 本"
+    }
+
+    rule "order-follows-signal-flow" {
+        note "同じページ内は信号の流れ順（OSC → FILTER → AMP → FX）に並べる。"
+        note "機種が違っても手が同じ場所を探せる"
+    }
+
+    rule "unlisted-fills-after" {
+        note "spec に書かれていないパラメータは、AU の並び順で後ろのページへ"
+        note "自動的に敷き詰める（fillingDefaults）。spec は**前に出すもの**だけ決める"
+    }
+
+    // =========================================================================
+    // 機種ごとの配置 — P1 に出すものだけを書く
+    // 残りは AU の並び順で自動的に後ろへ回る
+    // =========================================================================
+
+    gadget "Lisbon (Sci-Fi)" au-name="Lisbon" params=67 {
+        page 1 {
+            knob at=1 param="VCO Waveform"
+            knob at=2 param="VCO Grit"
+            knob at=3 param="VCO Spread"
+            knob at=4 param="VCF Cutoff"
+            knob at=5 param="VCF Peak"
+            knob at=6 param="EG1 Attack"
+            knob at=7 param="EG1 Decay"
+            knob at=8 param="VCO Glide"
+        }
+    }
+
+    gadget "Pompei (Polysix)" au-name="Pompei" params=40 {
+        page 1 {
+            knob at=1 param="VCO Octave"
+            knob at=2 param="VCO Waveform"
+            knob at=3 param="VCF Cutoff"
+            knob at=4 param="VCF Resonance"
+            knob at=5 param="VCF EG Intensity"
+            knob at=6 param="Unison Detune"
+            knob at=7 param="VCA Attenuator"
+            knob at=8 param="Output Volume"
+        }
+    }
+
+    gadget "Phoenix (Analog)" au-name="Phoenix" params=38 {
+        page 1 {
+            knob at=1 param="OSC1 Waveform"
+            knob at=2 param="OSC Balance"
+            knob at=3 param="OSC2 Detune"
+            knob at=4 param="Filter Freq"
+            knob at=5 param="Filter Reso"
+            knob at=6 param="Filter Attack"
+            knob at=7 param="Filter Release"
+            knob at=8 param="Portamento"
+        }
+    }
+
+    gadget "Warszawa (Wavetable)" au-name="Warszawa" params=34 {
+        page 1 {
+            knob at=1 param="Osc Position"
+            knob at=2 param="Osc Mod Depth"
+            knob at=3 param="Filter Cutoff"
+            knob at=4 param="Filter Peak"
+            knob at=5 param="Filter EG Int"
+            knob at=6 param="Unison Detune"
+            knob at=7 param="Glide"
+            knob at=8 param="Arp Speed"
+        }
+    }
+
+    gadget "Helsinki (Pad)" au-name="Helsinki" params=19 {
+        page 1 {
+            knob at=1 param="Waveform"
+            knob at=2 param="Low Level"
+            knob at=3 param="High Level"
+            knob at=4 param="Filter Freq"
+            knob at=5 param="Filter Reso"
+            knob at=6 param="Env Attack"
+            knob at=7 param="Env Release"
+            knob at=8 param="Reverb Level"
+        }
+    }
+
+    gadget "Milpitas (Wavestation)" au-name="Milpitas" params=8 {
+        page 1 {
+            knob at=1 param="Joy X Value"
+            knob at=2 param="Joy Y Value"
+            knob at=3 param="Joy X Dest"
+            knob at=4 param="Joy Y Dest"
+            knob at=5 param="Modulation"
+            knob at=6 param="Master Volume"
+        }
+        note "8 個しか無い機種。P1 に全部収まる"
+    }
+
+    gadget "Marseille (Keys)" au-name="Marseille" params=13 {
+        page 1 {
+            knob at=1 param="Env Attack"
+            knob at=2 param="Env Decay"
+            knob at=3 param="Env Sustain"
+            knob at=4 param="Env Release"
+            knob at=5 param="FX1 Edit 1"
+            knob at=6 param="FX1 Edit 2"
+            knob at=7 param="FX2 Edit 1"
+            knob at=8 param="FX2 Edit 2"
+        }
+        note "**PCM 音源**（M1 系のロムプラー）。音色は本体の PROGRAMS リストで選ぶ — \
+              ORGAN / STRINGS / BRASS / BASS LEAD と性格が大きく違うものが同居する"
+        note "⚠️ **音色選択は AU パラメータに無い**。公開されるのは EG 4 + Output + \
+              FX 2 系統だけ（全 13、ホイール 2 を引いて割当対象 11）。\
+              MIDI Program Change でなら切り替わる（実測 2026-08-05）が、\
+              ladyland は PC を VALUE エンコーダーのトラック移動に使っていて楽器へ流さない"
+        note "**音源部を 1 つも公開しない**初の機種。order-follows-signal-flow の \
+              OSC / FILTER が無いので、EG（AMP）→ FX1 → FX2 の順に読み替えた"
+        note "⚠️ **EG はどの音色にも共通で効く数少ないつまみ**なので ADSR を 4 つ揃える。\
+              音色がプログラムで決まる機種では、ここが唯一の共通操作面になる。\
+              オルガンのような持続音では Sustain が効くので、落としてはいけない"
+        note "落とした Output Level — 音量はフェーダー / ミキサー側で取れる。\
+              FX1 Type / FX2 Type は**離散値**で、回すと別のエフェクトへ飛ぶ\
+              （p1-is-performance）。3 つとも P2 へ自動で回る"
+    }
+
+    // TODO(2026-08-04): 残り 27 機種は実演しながら P1 を決める。
+    // spec に無い機種は全パラメータが AU の並び順で自動配置される（現状の挙動）
+}

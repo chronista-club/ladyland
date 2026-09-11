@@ -1,0 +1,16 @@
+[package]
+name = "cortex-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Audio playback and analysis (cpal + symphonia + rustfft)"
+
+[dependencies]
+cortex-types = { workspace = true }
+cpal = { workspace = true }
+symphonia = { workspace = true }
+rustfft = { workspace = true }
+crossbeam-channel = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

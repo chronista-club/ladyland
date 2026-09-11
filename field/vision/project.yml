@@ -1,0 +1,26 @@
+# LadylandField — Vision Pro から Field に降り立つ（design/07 クライアント②）。
+# xcodegen で生成: cd field/vision && xcodegen && open LadylandField.xcodeproj
+name: LadylandField
+options:
+  bundleIdPrefix: club.chronista
+  deploymentTarget:
+    visionOS: "2.0"
+packages:
+  club-unison:
+    path: ../../../club-unison
+targets:
+  LadylandField:
+    type: application
+    platform: visionOS
+    sources: [Sources]
+    dependencies:
+      - package: club-unison
+        product: UnisonClient
+    settings:
+      base:
+        PRODUCT_NAME: LadylandField
+        SWIFT_VERSION: "5.10"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        # ローカルネットワーク（fieldd への QUIC）の用途表示
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Ladyland の Field（fieldd）に接続します"
