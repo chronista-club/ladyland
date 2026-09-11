@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.build/
+DerivedData/
+target/
+
+# Data (SurrealDB)
+data/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.local.*
+
+# MCP
+.mcp.json
+
+# IDE
+.idea/
+*.xcuserdata/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary
+*.tmp
+*.temp
+.cache/
+
+# Vantage Point lane workspaces (project-local lane refactor)
+.vp/
+
+# 機材のファームウェア / インストーラ（docs/ の一次資料は PDF のみ追跡）
+*.bin
+*.dmg
+.claude/worktrees/
+field/vision/LadylandField.xcodeproj/

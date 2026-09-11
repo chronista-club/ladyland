@@ -1,0 +1,42 @@
+{
+    "version": 1,
+    "type": "MIDI",
+    "name": "SETUP 01",
+    "index": 0,
+    "knobs": [
+        {
+            "controlIndex": 7,
+            "controlMode": 0,
+            "controlChannel": 1,
+            "controlParam": 0,
+            "nrpnAddress": 0,
+            "minValue": 0,
+            "maxValue": 127,
+            "controlName": "CH:1/CC:0",
+            "colorScheme": 70,
+            "hapticMode": 0,
+            "hapticIndent1": 255,
+            "hapticIndent2": 255,
+            "hapticSteps": 0,
+            "stepNames": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+            ]
+        }
+    ],
+    "buttons": []
+}

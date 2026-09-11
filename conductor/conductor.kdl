@@ -1,0 +1,6 @@
+// conductor 設定ファイル
+// FleetFlowサービスの監視・自動復旧設定
+
+conductor interval=30 stage="local" max-restarts=5 {
+    service "surrealdb" health-check="http://localhost:8000/health"
+}

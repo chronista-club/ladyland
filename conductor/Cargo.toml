@@ -1,0 +1,19 @@
+[package]
+name = "conductor"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/chronista-club/bikeboy-ladyland"
+description = "FleetFlow service monitor and auto-restart daemon"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+kdl = "4"
+reqwest = { version = "0.12", features = ["json"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"

@@ -1,0 +1,35 @@
+// プラグインの Page 既定（page-defaults.kdl）のスキーマ。
+// 形式: club-kdl-codegen の data dialect（~/repos/club-kdl — 将来 Rust/TS 側と
+// 型を共有するならここから生成する。Swift 側は部分実装で読む:
+// ladyland/Sources/Ladyland/PluginPageDefaults.swift）。
+//
+// 実データは Application Support/ladyland/page-defaults.kdl に住む。
+// トップレベルは plugin ノードの列 — ノード引数がプラグイン名（AU の表示名）。
+//
+// 例:
+//   plugin "Montpellier (Mono/Poly)" {
+//       knob at=0 address=22 name="VCF Cutoff"
+//       knob at=1 address=23 name="VCF Resonance" alias="Reso"
+//       cell 0 color=71
+//   }
+
+struct "PageDefault" {
+    field "plugin" type="string"        // AU の表示名（ノード引数）
+    field "knobs" type="array<Knob>"    // 顔つまみ割当（全 8 ページぶん）
+    field "cells" type="array<Cell>"    // 席色の上書き（無い席はページ色に落ちる）
+}
+
+struct "Knob" {
+    field "at" type="u8"                // 席 = 帯の CC（0-63。KnobPages 正典）
+    field "address" type="u64"          // AUParameter address（同一 AU 内で安定）
+    field "name" type="string"          // パラメータ名（address が引けないときの手掛かり）
+    field "alias" type="string" optional=#true  // 手で付けた別名
+    // パラメータの色（ROTO 83 色 index — 割当の属性なので配置換えについて回る。
+    // 未設定は 席色 > トラックカラー > ページ色 に落ちる。2026-08-15）
+    field "color" type="u8" optional=#true
+}
+
+struct "Cell" {
+    field "cc" type="u8"                // 席 = 帯の CC（ノード引数）
+    field "color" type="u8"             // ROTO 83 色パレットの index
+}

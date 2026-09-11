@@ -1,0 +1,21 @@
+// bikeboy FleetFlow設定
+project "bikeboy"
+
+stage "local" {
+    service "surrealdb"
+}
+
+service "surrealdb" {
+    image "surrealdb/surrealdb:v2"
+    ports {
+        port 8000 8000
+    }
+    volumes {
+        volume "./data/surrealdb" "/data"
+    }
+    env {
+        SURREAL_USER "root"
+        SURREAL_PASS "root"
+    }
+    command "start" "--auth" "--allow-all" "--allow-guests" "rocksdb:///data/bikeboy.db"
+}

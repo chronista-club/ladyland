@@ -1,0 +1,51 @@
+# ladyland の CI（2026-08-09 導入。docs/ci.md に runner の登録手順）。
+#
+# ⭐ 実行環境は **makomac の self-hosted runner**（mako 裁定 2026-08-09）。
+#   - private リポジトリの GitHub ホスト macOS は分数 10 倍課金で割に合わない
+#   - この Mac には Xcode 26.6 / 音声デバイス / KORG プラグインが揃っているので、
+#     実 AU 統合テスト（音量 0.02 の微音が鳴る）まで**全部走る** —
+#     クラウド runner では skip になる範囲もここでは検証できる
+#
+# ⚠️ required check にはしていない — Mac がスリープ中でもマージは詰まらない。
+#   check が pending のままなら runner が寝ているだけ（docs/ci.md）。
+name: ci
+
+on:
+  pull_request:
+    branches: [nightly, main]
+  push:
+    branches: [nightly]
+  workflow_dispatch:
+
+# 連続 push は最後の 1 回だけ検証する（古い run は捨てる）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-matrix:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        # LFS は引かない — テストは WAV を temp に自前生成する。
+        # LFS 管理の音源を読むテストを足すときは `lfs: true` を付けること
+
+      # ⚠️ ladyland/Package.swift のパス依存（`../../creo-ui/packages/swift` /
+      # `../../club-unison`）の解決。開発レーン（.vp/lanes/）と同じく、この Mac の
+      # ローカル clone を指す symlink を workspace の隣に置く — dev と CI が
+      # 同じ実体を見る。⚠️ **Package.swift にパス依存を足したらここにも足す**
+      # （足し忘れは「cannot be accessed」で即死するので黙っては壊れない）。
+      # ⚠️ runner をこの Mac 以外へ移すときは、各リポジトリを第 2 checkout して
+      # 同じ位置へ symlink する方式に切り替えること
+      - name: パス依存を解決（creo-ui / club-unison）
+        run: |
+          ln -sfn /Users/makomac/repos/creo-ui "$GITHUB_WORKSPACE/../creo-ui"
+          ln -sfn /Users/makomac/repos/club-unison "$GITHUB_WORKSPACE/../club-unison"
+
+      - name: ツールチェーンを記録
+        run: swift --version
+
+      # フルマトリクス（3 モード + release ビルド）。定義は scripts/test-matrix.sh が正典
+      - name: test-matrix
+        run: ./scripts/test-matrix.sh

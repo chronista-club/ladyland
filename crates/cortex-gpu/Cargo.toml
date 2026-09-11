@@ -1,0 +1,24 @@
+[package]
+name = "cortex-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GPU rendering, shaders, and video encoding for bikeboy-cortex"
+
+[features]
+default = []
+ffmpeg = ["video-rs", "ndarray"]
+
+[dependencies]
+cortex-types = { workspace = true }
+wgpu = { workspace = true }
+glyphon = { workspace = true }
+winit = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Video encoding (optional, requires FFmpeg)
+video-rs = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }

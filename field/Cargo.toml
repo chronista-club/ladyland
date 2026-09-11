@@ -1,0 +1,22 @@
+# fieldd — Ladyland System に常駐する Field サーバ（spec/08 / design/07）。
+# ルートの cortex workspace には混ぜない（[workspace] 空宣言で独立 —
+# cortex は「残して置いていく」2026-07-30 裁定のまま触らない）
+
+[package]
+name = "fieldd"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/chronista-club/bikeboy-ladyland"
+
+[dependencies]
+# crates.io package = club-unison / Rust crate identifier = unison
+club-unison = "1.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[workspace]

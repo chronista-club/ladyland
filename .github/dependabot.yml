@@ -1,0 +1,71 @@
+version: 2
+updates:
+  # cortex — Rust ワークスペース（wgpu / glyphon / winit / cpal など主要スタック）
+  - package-ecosystem: "cargo"
+    directory: "/"
+    target-branch: "nightly"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # wgpu 系は相互依存が強いので、まとめて1つのPRで上げる
+      gpu-stack:
+        patterns:
+          - "wgpu"
+          - "glyphon"
+          - "winit"
+          - "bytemuck"
+      audio-stack:
+        patterns:
+          - "cpal"
+          - "symphonia"
+          - "rustfft"
+      midi-stack:
+        patterns:
+          - "midir"
+          - "midi-msg"
+      # 上記以外の minor / patch はノイズ削減のため1つのPRに集約
+      # （major は個別PRで来るので見落とさない）
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # conductor — ワークスペース外の独立クレート
+  - package-ecosystem: "cargo"
+    directory: "/conductor"
+    target-branch: "nightly"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      conductor-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # bikeboy-mcp — Bun ランタイム（bun.lock を更新）
+  - package-ecosystem: "bun"
+    directory: "/bikeboy-mcp"
+    target-branch: "nightly"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      mcp-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

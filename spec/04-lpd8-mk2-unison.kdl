@@ -1,0 +1,251 @@
+// =============================================================================
+// spec/04 — LPD8 mk2 統合仕様（AKAI LPD8 mk2 × ladyland）
+//
+// spec = Why の層: 「なぜこのバイト列・この操作系・この測定なのか」を固定する。
+// How（実装）は ladyland/Sources/Lpd8Kit と RigBench に住み、実行可能な正は
+// コード + 実機ゴールデンテスト（Living Documentation。spec/04-lpd8-mk2-unison.md 参照）。
+//
+// 凡例（unison-protocol の schema 語彙に倣う。~/repos/club-unison/schemas/ 参照）:
+//   layer     仕様の 3 階層: wire-protocol（ワイヤ）/ interaction（人間）/ harness（測定）
+//   message   SysEx 1 フレーム。cmd= コマンドバイト / direction= 方向 / frame-bytes= 全長
+//   field     バイト領域。at= payload 先頭からの offset / size= バイト数
+//             （count= 付きは配列。子 field の並びは 1 entry 内の順序）
+//   fact      実機測定で確定した事実。measured= 測定日 / rig= 測定環境
+//   rule      設計帰結 — ワイヤ事実から導かれる「こうしなければならない」
+//   bench     RigBench の 1 測定（swift run RigBench <name>）
+//
+// 出典: VP doc 22（Wireshark 逆解析 3 repo の独立一致 — stephensrmmartin/lpd8mk2 /
+// john-kuan/lpd8mk2sysex / john-kuan/lpd8mk2-traktor）+ 2026-07-31 実機確定
+// （RigBench lpd8-program-dump、4 プログラム全一致。Creo mem_1CdZe314eTYVofGrhZN6xy）
+// =============================================================================
+
+spec "lpd8-mk2" version="1.0.0" {
+    namespace "club.chronista.ladyland.lpd8"
+
+    // 対象は mk2 のみ。初代 LPD8 は model 0x75 + 別 command 体系で非互換
+    // （mk2 は初代向けフレームを黙って無視する — 2026-06-13 実機確定、VP doc 22 §1）
+    device "AKAI LPD8 mk2" pads=8 knobs=8 grid="2x4"
+
+    // =========================================================================
+    // 第 1 層: ワイヤプロトコル — SysEx のバイトレイアウトと実測性能
+    // 実装: ladyland/Sources/Lpd8Kit/Lpd8SysEx.swift / Lpd8Program.swift
+    // =========================================================================
+    layer "wire-protocol" {
+
+        // 共通ヘッダ: F0 47 7F 4C = sysex-start / Akai / broadcast / mk2
+        header bytes="F0 47 7F 4C" {
+            byte 0x47 name="manufacturer"
+            byte 0x7F name="device-id"
+            byte 0x4C name="model"
+        }
+
+        // 8bit(0-255) を MIDI 7bit ×2（MSB→LSB）に割る。
+        // Why: mk2 は艦隊唯一の量子化なしフル RGB pad — 255 階調を捨てない為の encoding
+        encoding "pack7" {
+            encode "[v >> 7, v & 0x7F]"
+            decode "(hi & 0x01) << 7 | (lo & 0x7F)"
+            // 白 255 → ワイヤ 01 7F
+            example value=255 wire="01 7F"
+        }
+
+        // --- LED 一括更新 ----------------------------------------------------
+        // F0 47 7F 4C 06 00 30 <8 pad × RGB 各 pack7 = 48B> F7（計 56 byte）
+        message "led-update" cmd=0x06 direction="host->device" frame-bytes=56 {
+            // 14bit 長: 0x00 0x30 = payload 48 byte（LED は素直な payload 長）
+            length-bytes "00 30"
+            field "pads" count=8 entry-bytes=6 {
+                field "r" encoding="pack7" range="0-255"
+                field "g" encoding="pack7" range="0-255"
+                field "b" encoding="pack7" range="0-255"
+            }
+            // 部分更新はプロトコルに存在しない — 送るなら常に 8 パッド一括
+            rule "all-pads-only"
+            // 0x06 は揮発オーバーレイ: プログラム色（本体側の正）の上に被せるだけ。
+            // 挿し直しで消える / パッド押下でプログラム色が再主張する
+            rule "volatile-overlay"
+        }
+
+        // --- プログラム GET 要求 ---------------------------------------------
+        // F0 47 7F 4C 03 00 01 <prog 1-4> F7（計 9 byte）
+        message "program-get" cmd=0x03 direction="host->device" frame-bytes=9 {
+            length-bytes "00 01"
+            field "program" at=0 size=1 range="1-4"
+        }
+
+        // --- プログラム本体（GET 応答 = SET と同一レイアウト） -----------------
+        // F0 47 7F 4C <cmd> 01 29 <payload 165B> F7（計 173 byte）
+        // cmd 0x03 = GET 応答 / 0x01 = SET。
+        // レイアウトは 2026-07-31 実機ダンプ（4 プログラム全一致）で確定
+        message "program-frame" direction="both" frame-bytes=173 payload-bytes=165 {
+            cmd get-response=0x03 set=0x01
+            // 長さ表記 01 29 は 14bit 解釈（169）でも payload 実測（165）とも一致しない
+            // 実機定数。導出せず、このバイト列そのものを pin する（decode は完全一致要求）
+            length-bytes "01 29"
+
+            field "program" at=0 size=1 range="1-4"
+            // ワイヤ生値 = チャンネル - 1
+            field "global-channel" at=1 size=1 range="0-15"
+            field "pressure" at=2 size=1 {
+                value 0 "off"
+                value 1 "channel"
+                value 2 "polyphonic"
+            }
+            // ワイヤは否定論理: 0 = full level ON
+            field "not-full-level" at=3 size=1
+            field "toggle" at=4 size=1
+
+            field "pads" at=5 count=8 entry-bytes=16 {
+                field "note" size=1
+                field "cc" size=1
+                field "program-change" size=1
+                // 0-15 = ch1-16 / 0x10 = グローバルチャンネルに従う
+                field "channel" size=1 range="0-15" follow-global=0x10
+                field "color-a" size=6 encoding="pack7-rgb"
+                field "color-b" size=6 encoding="pack7-rgb"
+            }
+            field "knobs" at=133 count=8 entry-bytes=4 {
+                field "cc" size=1
+                field "channel" size=1 range="0-15" follow-global=0x10
+                field "min" size=1
+                field "max" size=1
+            }
+
+            // color-a = 消灯時（off）/ color-b = 押下時（on）と解釈する。
+            // 根拠: stephensrmmartin/lpd8mk2 の config 順（off, on）+
+            // 押下で色が切り替わる挙動は目視確認済み。もし逆と判れば
+            // Swift 側フィールド名の入れ替えのみ — ワイヤバイトは不変
+            rule "color-a-is-off-color-b-is-on"
+            // decode は未知レイアウトを nil で拒否 — エディタはエラー表示に落ち、
+            // 誤 SET でゴミを書かない。encode↔decode round-trip は
+            // 実機ゴールデンで byte-exact（Lpd8KitTests）
+            rule "reject-unknown-layout"
+        }
+
+        // --- 受信経路（macOS / CoreMIDI） ------------------------------------
+        // ._1_0 プロトコル入力ポートでも SysEx は UMP MessageType 3（Data 64bit）
+        // で届く。F0/F7 はワイヤに乗らず status が開始/終了を運ぶため、
+        // 組立側で付け直して送信側のフレーム表現（F0…F7）と対称にする。
+        // 実装: ladyland/Sources/Lpd8Kit/SysEx7Assembler.swift
+        fact "sysex-receive-is-ump-mt3" measured="2026-07-31" {
+            words-per-packet 2
+            data-bytes-per-packet max=6
+            status complete=0 start=1 continue=2 end=3
+            f0-f7 "stripped on wire / re-added by assembler"
+        }
+
+        // --- 実測性能 --------------------------------------------------------
+        // LED フレームのサービス時間はレート非依存の固定コスト ≈107ms。
+        // 15Hz 以上で流すとドライバキューが飽和（MIDISendSysex 完了コールバックの
+        // 滞留 = backpressure として測定。RigBench lpd8-led-rate）
+        fact "led-frame-service-time" measured="2026-07-31" rig="M5 MacBook Air" {
+            service-ms-per-frame 107
+            sustainable-fps "9-10"
+            saturates-at-hz 15
+            observed-via "MIDISendSysex completion callback の滞留"
+        }
+        // 帰結: 送り手は completion-gated — in-flight は常に最大 1 フレーム。
+        // タイマ駆動で流し込む設計は禁止（キュー飽和で LED が現在から乖離していく）
+        rule "completion-gated-sender" max-in-flight=1
+    }
+
+    // =========================================================================
+    // 第 2 層: 人間の認知・操作 — LPD8 が演奏体験の中で担う役割
+    // 文脈: design/06 §3（機材と入力の役割）
+    // =========================================================================
+    layer "interaction" {
+
+        // LPD8 = 第 2 の声部。LPD8 スロット（ドラムに限らず任意の AU）を叩く。
+        // Keystage の楽器持ち替えから独立 — 指ドラムにもセカンドキーボード
+        // （ベースのルート / パッド和音）にもなる（2026-07-30 実機確認）
+        role "second-voice" {
+            routing "pads -> drum-slot"
+            independent-of "Keystage instrument switching"
+        }
+
+        // 物理 2×4 グリッドと工場出荷風ノート割当（program 1 実機観測）。
+        // entry 順とノートは素直に昇順対応しない — 観測値をそのまま pin
+        note-map program=1 observed="2026-07-31" {
+            entries "0-3" notes="44-47"
+            entries "4-7" notes="40-43"
+        }
+
+        // 色の意味論: プログラム色はデバイス自身が持つ正、0x06 はその上の揮発表示
+        semantics {
+            off-color "待機時のアイデンティティ（どのパッドが何者か）"
+            on-color "押下フィードバック"
+            program-colors "device-owned truth（挿し直しで常にここへ戻る）"
+            led-update "volatile overlay（アプリが生きている間だけの表示）"
+        }
+
+        // LED を UX 面として使う計画（LedBus）。優先度合成 — 上の overlay が勝つ
+        led-surface "LedBus" status="planned" {
+            layer-stack {
+                // 選択スロット変更の瞬間フラッシュ
+                overlay "flash" priority=1 duration-ms=400 trigger="selected slot change"
+                // ドラムスロットの音量メーター（輝度変調）。
+                // fps はワイヤ実測上限（9-10fps）に従い、輝度は 16 段に量子化
+                overlay "volume-meter" priority=2 fps=9 quantize-steps=16 source="drum-slot level"
+                // キー/スケールの基底色 — 各パッドのノートがスケール上のどこか
+                base "key-scale" priority=3 {
+                    color-for "root"
+                    color-for "in-scale"
+                    color-for "out-of-scale"
+                }
+            }
+            // ライブで LED が邪魔なら一発で切れる。設定として永続化
+            kill-switch persisted=#true
+            // 終了時は全消灯フレームを送る。0x06 の上書きは挿し直しまで実機に残る
+            // ため、消さずに終了すると中途半端な表示が残置される。
+            // パッド押下でプログラム色が再主張するので実害はないが、見た目の礼儀
+            on-quit "send all-off led-update frame"
+        }
+    }
+
+    // =========================================================================
+    // 第 3 層: 測定 harness — RigBench の契約
+    // 実装: ladyland/Sources/RigBench/
+    // =========================================================================
+    layer "harness" {
+
+        // RigBench = 機材測定ベンチ集。criterion / package-benchmark に載せない理由:
+        // 機材測定は副作用あり（LED が光る・実機状態が変わる）・1 ショット・
+        // 目視併用のシステム測定であって、統計反復のマイクロベンチではない。
+        // Rust でも criterion に載せず --bin にする類の仕事
+        harness "RigBench" {
+            usage "swift run RigBench" effect="ベンチ一覧を表示"
+            usage "swift run RigBench <name>" effect="1 本実行"
+            // protocol Bench — Benches/ に 1 型作り main.swift の一覧に足すだけ
+            contract "Bench" {
+                field "name" type="string" required=#true {
+                    // CLI 識別子。kebab-case
+                }
+                field "summary" type="string" required=#true
+                method "run" throws=#true
+            }
+            support "MIDISysExSender" {
+                role "送信 + 完了コールバック = backpressure の観測点"
+            }
+            support "Stats" {
+                role "sent / completed / outstanding / latency の集計"
+            }
+        }
+
+        // LED レート上限測定（RigBench 第 1 号）。ドライバ指標が綺麗なのに
+        // 目視でカクつく場合はファームウェア側の処理落ち = そちらが真の上限
+        bench "lpd8-led-rate" {
+            summary "LED 0x06 のレート上限（5→120Hz ランプ、各ステップ 5s、虹パターン目視併用）"
+            metrics-per-step "sent" "completed" "max-outstanding" \
+                "completion-latency-avg-ms" "completion-latency-max-ms" \
+                "late-frames" "drain-ms"
+            // 滞留が積み上がる = デバイスが食い切れていない。無制限に流し込まない
+            abort-when "outstanding > 100"
+        }
+
+        // プログラムレイアウトのゴールデン採取。出力 hex はテストにそのまま貼れる
+        // 形式 — 実機バイトが codec テストの正になる経路
+        bench "lpd8-program-dump" {
+            summary "プログラム 1-4 を GET (0x03) して hex ダンプ（ゴールデン採取）"
+            output-format "Lpd8KitTests のゴールデンとして貼れる hex 配列"
+        }
+    }
+}

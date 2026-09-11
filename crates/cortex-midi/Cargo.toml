@@ -1,0 +1,16 @@
+[package]
+name = "cortex-midi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MIDI input handling (midir + midi-msg)"
+
+[dependencies]
+cortex-types = { workspace = true }
+cortex-gpu = { workspace = true }
+midir = { workspace = true }
+midi-msg = { workspace = true }
+crossbeam-channel = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
