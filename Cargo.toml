@@ -34,8 +34,8 @@ symphonia = { version = "0.5", features = ["all"] }
 rustfft = "6.2"
 
 # Graphics
-wgpu = "28.0"
-glyphon = "0.10"
+wgpu = "30.0"
+glyphon = "0.12"
 winit = "0.30"
 bytemuck = { version = "1.14", features = ["derive"] }
 
