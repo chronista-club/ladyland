@@ -3,7 +3,7 @@ name = "conductor"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/chronista-club/bikeboy-ladyland"
+repository = "https://github.com/chronista-club/ladyland"
 description = "FleetFlow service monitor and auto-restart daemon"
 
 [dependencies]

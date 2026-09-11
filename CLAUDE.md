@@ -1,9 +1,10 @@
-# bikeboy-ladyland プロジェクト
+# ladyland プロジェクト
 
 LPD8 MIDIコントローラーを活用したワークスペース管理ツール + オーディオ・ビジュアル・デバイス統合コントロールシステム。
 
 > **Ladyland** = バンド Bikeboy Experience と、その楽器たち（electric ladies）が住むスタジオ。
-> 命名は『Electric Ladyland』へのオマージュ（旧 repo 名: bikeboy、2026-07-23 リネーム）。
+> 命名は『Electric Ladyland』へのオマージュ（旧 repo 名: bikeboy → bikeboy-ladyland、2026-07-23 リネーム）。
+> 2026-09-11 に公開リポジトリ `chronista-club/ladyland` として OSS 化（Apache-2.0、履歴なしで移設。旧私有リポは残置）。
 
 ## ⚡ 現在の主戦場: `ladyland/`（Swift アプリ、2026-07-30 裁定）
 
@@ -49,7 +50,7 @@ feature/* ──PR──→ nightly（開発の先端）──マージ──→
 ## プロジェクト構造
 
 ```
-bikeboy-ladyland/
+ladyland/
 ├── ladyland/                  # ⚡ 8/8 ライブ用 Swift アプリ（主戦場。design/06）
 ├── bikeboy-launcher/          # Swift製macOSアプリ（MIDIコントローラー連携）
 ├── bikeboy-mcp/               # MCP (Model Context Protocol) サーバー（Bun + TypeScript）
@@ -145,6 +146,14 @@ LADYLAND_BENCH=1 swift test -c release --filter RenderBenchTests
 
 **すべて既定 on。`=0` で切る。** 当日フラグを思い出す必要がある状況＝
 何かが壊れている状況なので、**探し回らずに済むようここへ集めてある**。
+
+⭐ **本番の `.app` にフラグを渡すには `launchctl setenv`**（Finder / Spotlight 起動は
+シェルの環境変数を継承しない。`open` 経由で届くことは 2026-09-12 に実測済み）:
+
+```bash
+launchctl setenv LADYLAND_MAIN_LCD 0 && open -a Ladyland   # 付けて起動
+launchctl unsetenv LADYLAND_MAIN_LCD                       # 戻す（次回起動から）
+```
 ⚠️ `=0` 系の退避路を足したら **`scripts/test-matrix.sh` の ESCAPE_HATCHES にも足す**
 （マトリクスのモード 2 = 退避路すべて 0 の検証がズレる）。
 

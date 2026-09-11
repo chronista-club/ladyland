@@ -7,7 +7,7 @@ name = "fieldd"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/chronista-club/bikeboy-ladyland"
+repository = "https://github.com/chronista-club/ladyland"
 
 [dependencies]
 # crates.io package = club-unison / Rust crate identifier = unison

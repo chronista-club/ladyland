@@ -1,8 +1,18 @@
-# OSS 公開チェックリスト（保留中 — 時間が取れたら再開）
+# OSS 公開チェックリスト（✅ 2026-09-11 公開済み）
 
 > 2026-08-10 の棚卸し（全履歴 374 コミット監査）に基づく。
 > 状態の正典: Creo `mem_1CdtL2fmkZak1o2HgsJSsP`。
 > ⭐ **秘密情報ゼロ・GPL 依存ゼロ・個人情報なし**は監査済み — 怖いものは残っていない。
+
+## 結果（2026-09-11）
+
+- 公開先: [`chronista-club/ladyland`](https://github.com/chronista-club/ladyland)（Apache-2.0、名義 Anycreative Inc.）
+- **履歴なしの新リポ**として移設（下の手順 2 `git filter-repo` は不要になった）。旧私有 `bikeboy-ladyland` は残置
+- CreoUI のパス依存は **A 案**: `creo-ui` / `club-unison` を公開し、README に隣接 clone の手順を記載
+- 公開後の掃除（2026-09-12）: self-hosted runner を新リポへ付け替え、旧リポ名の参照を一掃、空だった `.claude/CLAUDE.md` を削除
+- 残した判断: `.claude/skills/`（kdl / surrealdb の汎用スキル、個人参照なし）と Team ID の doc 記載（署名バイナリに元々入る公開情報）はそのまま
+
+---
 
 ## 裁定済み（mako 2026-08-10）
 

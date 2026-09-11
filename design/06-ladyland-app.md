@@ -111,7 +111,7 @@ P2 完了時点で「最低限ライブに出られる」— これがスケジ�
   1. **帯ごと横取り（当初は割当ベース）**: ノブ CC は鍵盤と同じ KBD/CTRL ポートに届く（CC 番号は位置固定、ページ = CC ÷ 8 が正典。P1 = CC0-7）。**現在はノブ帯（CC0-63 = 8 ページ・64 席）を割当の有無に関わらず全部飲む**（#75、`KeystageKnobs`）— 未割当ノブは楽器に届かない。当初は「割当のある CC だけ横取りし、Mod ホイール（当時 CC1 = ノブ2 と同番号）はノブ2 を割り当てないことで生かす」というユーザー選択方式だったが、Mod = CC116 / Exp = CC115 へ焼いて帯の外へ退かせたことで衝突自体が消えた（2026-08-07）
   2. **ピックアップ**（終点ありポット対策）: ノブが現在値を拾う（±0.02 or 跨ぎ）まで適用しない。純関数 `KnobPickup` としてテストで仕様固定
   3. CC はレイテンシ非敏感なので RT → main へホップしてから適用（MainActor の状態と自然に整合。ノート経路は従来どおり RT 直送）
-- レイテンシ実測（鍵盤 → ladyland → L6max 出音。doc 05 §8 から持ち越し → リハで体感確認）
+- レイテンシ実測（鍵盤 → ladyland → L6max 出音。doc 05 §8 から持ち越し）→ **道具あり（2026-09-12）**: `swift run RigBench audio-latency`（予算 = CoreAudio 申告の frames。手元の L6max は出力 540 frames = 11.25 ms @ 48k）、`--loopback` で往復の実測。数字は docs/l6max/README.md §7 に残す
 - SPM executable の .app バンドル化の要否（開発は `swift run` で足りる。本番運用の形は P4 で判断）
 - ROTO ミラーの実装範囲（VP doc 20 が SSOT。乗せる場合も GUI が正、ROTO は写像）
 - （P4 余力）Keystage ノブ OLED への割当パラメータ名表示 — SysEx Display Message（docs/keystage/README.md §5)。送出ポート（CTRL か DAW OUT か）の実機確認が必要
