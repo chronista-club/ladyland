@@ -6,6 +6,7 @@
 
 import AppKit
 import CoreAudioKit
+import SwiftUI
 import Testing
 
 @testable import Ladyland
@@ -148,5 +149,66 @@ struct FocusPaneContainerTests {
         #expect(view.frame.size == CGSize(width: 900, height: 600))
         #expect(view.superview?.frame.size == CGSize(width: 450, height: 300))
         #expect(au.selections.isEmpty)
+    }
+}
+
+/// 実測 2026-09-23（スタジオ練習）: Lady MPE のトラックへ切り替えると
+/// `NSGenericException`（Update Constraints in Window のパスが尽きない）で落ちた。
+/// Lady MPE の画面は NSHostingController で、既定の sizingOptions だと SwiftUI が
+/// 最小・最大サイズを**制約**として張る。focus pane は frame / bounds で縮小表示する
+/// ので両者がぶつかり、窓のレイアウトが収束しない。
+/// 実物の部品（ラック・プラグイン窓・focus pane）で切り替えを通す — 落ちれば赤
+@Suite("focus pane 実物の切り替え", .serialized)
+@MainActor
+struct FocusPaneSwitchTests {
+    @MainActor
+    private final class Pane: ObservableObject {
+        @Published var view: NSView?
+        @Published var unit: AUAudioUnit?
+    }
+
+    private struct Root: View {
+        @ObservedObject var pane: Pane
+        var body: some View {
+            FocusPaneHost(hosted: pane.view, audioUnit: pane.unit).padding(4)
+        }
+    }
+
+    @Test("自作楽器の画面を載せ替えてもレイアウトが収束する", arguments: [
+        LadySynth.displayName, LadySampler.displayName,
+    ])
+    func switchToBuiltInEditor(name: String) async throws {
+        let rack = InstrumentRack()
+        try rack.start()
+        defer { rack.engine.stop() }
+        rack.engine.mainMixerNode.outputVolume = 0
+        let component = try #require(rack.catalog.first { $0.name == name })
+        try await rack.load(component, into: rack.slots[0])
+        let slot = rack.slots[0]
+
+        let editors = PluginEditorWindows()
+        var ready = false
+        editors.onViewReady = { _ in ready = true }
+        _ = editors.borrowFocusPaneView(for: slot)  // 1 回目は取得を蹴るだけ
+        for _ in 0..<100 where !ready { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(ready, "\(name) の画面が届かない")
+
+        let pane = Pane()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: Root(pane: pane))
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        for _ in 0..<3 {
+            pane.view = try #require(editors.borrowFocusPaneView(for: slot))
+            pane.unit = slot.audioUnit?.auAudioUnit
+            try await Task.sleep(for: .milliseconds(150))
+            pane.view = nil
+            editors.reclaimFocusPaneView(slot.index)
+            try await Task.sleep(for: .milliseconds(50))
+        }
     }
 }
