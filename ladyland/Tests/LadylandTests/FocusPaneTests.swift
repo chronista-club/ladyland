@@ -4,6 +4,8 @@
 //! から view を借りる（custody）。ここでは表示状態の決定と、view を領域に
 //! 収める fit 計算（純関数）をピン留めする。
 
+import AppKit
+import CoreAudioKit
 import Testing
 
 @testable import Ladyland
@@ -77,5 +79,74 @@ struct FocusPaneFitTests {
         #expect(FocusPaneFit.fit(native: .zero, in: .init(width: 100, height: 100)).frame == .zero)
         #expect(
             FocusPaneFit.fit(native: .init(width: 100, height: 100), in: .zero).frame == .zero)
+    }
+}
+
+// mem_1CfGrPJYSvy8xFk3eZf4Ra: responsive AU views must receive the fitted size.
+private final class ResizingTestUnit: AUAudioUnit {
+    var acceptsResize = true
+    var selections: [CGSize] = []
+    override func supportedViewConfigurations(_ configurations: [AUAudioUnitViewConfiguration]) -> IndexSet {
+        acceptsResize ? IndexSet(integersIn: configurations.indices) : []
+    }
+    override func select(_ configuration: AUAudioUnitViewConfiguration) {
+        selections.append(CGSize(width: configuration.width, height: configuration.height))
+    }
+}
+
+@Suite("focus pane AU view sizing")
+@MainActor
+struct FocusPaneContainerTests {
+    private func unit() throws -> ResizingTestUnit {
+        try ResizingTestUnit(componentDescription: AudioComponentDescription(
+            componentType: 0x61756d75, componentSubType: 0x74657374,
+            componentManufacturer: 0x74657374, componentFlags: 0, componentFlagsMask: 0))
+    }
+
+    @Test("対応AUはframeをリサイズし、親の座標拡縮を重ねない")
+    func responsiveView() throws {
+        let au = try unit()
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 664, height: 500))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 1328, height: 747))
+        container.host(view, audioUnit: au)
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 664, height: 373.5))
+        #expect(view.superview?.bounds.size == view.superview?.frame.size)
+        #expect(au.selections == [CGSize(width: 664, height: 373.5)])
+        container.layout()
+        #expect(au.selections.count == 1)
+        container.setFrameSize(CGSize(width: 332, height: 500))
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 332, height: 186.75))
+        #expect(au.selections.count == 2)
+    }
+
+    @Test("別窓が回収したビューを古いペインのlayoutや解除が変更しない")
+    func reclaimedView() throws {
+        let au = try unit()
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 450, height: 300))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        container.host(view, audioUnit: au)
+        container.layout()
+        let editor = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        editor.addSubview(view)
+        view.frame = editor.bounds
+        container.layout()
+        #expect(view.frame == editor.bounds)
+        container.host(nil)
+        #expect(view.superview === editor)
+    }
+
+    @Test("非対応AUは元のサイズと従来の比例縮小を維持する")
+    func fixedView() throws {
+        let au = try unit()
+        au.acceptsResize = false
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 450, height: 300))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        container.host(view, audioUnit: au)
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 900, height: 600))
+        #expect(view.superview?.frame.size == CGSize(width: 450, height: 300))
+        #expect(au.selections.isEmpty)
     }
 }
