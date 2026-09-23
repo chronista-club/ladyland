@@ -40,7 +40,7 @@ struct IntegrationTests {
     @Test("MIDI モードの席 CC が割当パラメータに効く")
     func seatCCAppliesToParameter() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         quiet(rack)
@@ -62,7 +62,7 @@ struct IntegrationTests {
     @Test("ロード → ノートオン → 発音（RMS > 0）→ 切替作法で消音")
     func loadPlayAndRelease() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         quiet(rack)
@@ -96,7 +96,7 @@ struct IntegrationTests {
     @Test("ドラムスロット経路 — テスト AU をロードしてドラムノートで発音")
     func drumSlotPath() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         quiet(rack)
@@ -124,7 +124,7 @@ struct IntegrationTests {
     @Test("ロード済みスロットへの差し替え — 別のテスト AU に入れ替えて発音")
     func reloadIntoOccupiedSlot() async throws {
         let rack = InstrumentRack()
-        let tones = try [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
+        let tones = try await [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
         try rack.start()
         defer { rack.engine.stop() }
         quiet(rack)
@@ -629,7 +629,7 @@ struct IntegrationTests {
     @Test("スナップショット → 別ラックへ復元 — 楽器と gain が戻る")
     func snapshotRestore() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         try await rack.load(tone, into: rack.slots[2])
@@ -659,7 +659,7 @@ struct IntegrationTests {
     @Test("差し替え後のオフスクリーン自動サムネ — 実 AU の顔が撮れる")
     func offscreenThumbnailRefresh() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         try await rack.load(tone, into: rack.slots[0])
@@ -690,7 +690,7 @@ struct IntegrationTests {
     @Test("画面外撮影の店じまい後にエディタを開き直せる（実機バグ再現）")
     func reopenAfterOffscreenClose() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         try await rack.load(tone, into: rack.slots[0])
@@ -722,7 +722,7 @@ struct IntegrationTests {
     @Test("focus pane custody — 借用 → ウィンドウへ返却 → 開き直し（VC 1 回制約下）")
     func focusPaneCustodyLifecycle() async throws {
         let rack = InstrumentRack()
-        let tone = try TestInstrumentAU.component(in: rack)
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
         defer { rack.engine.stop() }
         try await rack.load(tone, into: rack.slots[0])
@@ -771,7 +771,7 @@ struct IntegrationTests {
     @Test("Drafts — 差し替えで棚に残り、切替で戻り、昇格で舞台へ移る")
     func draftLifecycle() async throws {
         let rack = InstrumentRack()
-        let tones = try [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
+        let tones = try await [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
         try rack.start()
         defer { rack.engine.stop() }
         quiet(rack)

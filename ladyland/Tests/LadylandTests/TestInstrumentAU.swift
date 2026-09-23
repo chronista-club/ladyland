@@ -20,12 +20,24 @@ final class TestInstrumentAU: AUAudioUnit, @unchecked Sendable {
     }()
     static func register() { _ = registration }
 
+    /// `registerSubclass` reaches `AVAudioUnitComponentManager` asynchronously: a
+    /// catalog enumerated right after registration can miss the fixture (seen as a
+    /// flaky first test). Yield to the main actor until it appears, then give up.
     @MainActor
-    static func component(in rack: InstrumentRack, index: Int = 0) throws -> InstrumentComponent {
-        try #require(rack.catalog.first {
-            $0.description.componentManufacturer == manufacturer &&
-            $0.description.componentSubType == subtypes[index]
-        }, "Test AU must be registered; never silently skip host coverage")
+    static func component(in rack: InstrumentRack, index: Int = 0) async throws -> InstrumentComponent {
+        func find(_ catalog: [InstrumentComponent]) -> InstrumentComponent? {
+            catalog.first {
+                $0.description.componentManufacturer == manufacturer &&
+                $0.description.componentSubType == subtypes[index]
+            }
+        }
+        if let found = find(rack.catalog) { return found }
+        for _ in 0..<100 {
+            try await Task.sleep(for: .milliseconds(20))
+            if let found = find(PluginCatalog.instruments()) { return found }
+        }
+        return try #require(nil as InstrumentComponent?,
+            "Test AU must be registered; never silently skip host coverage")
     }
 
     private let synth: LadySynth
