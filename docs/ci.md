@@ -6,7 +6,7 @@ workflow は `.github/workflows/ci.yml`、検証内容は `scripts/test-matrix.s
 ## なぜ self-hosted か
 
 - private リポジトリの GitHub ホスト macOS runner は**分数 10 倍課金**（1 run ≈ 100 分換算、無料枠 2000 分/月が 2〜3 回で尽きる）
-- この Mac には Xcode 26.6 / 音声デバイス / KORG プラグインが揃っていて、**実 AU 統合テストまで走る**（クラウドでは skip になる範囲）
+- この Mac には Xcode / 音声デバイスがあり、認証不要のテスト専用 AU で実エンジンの統合テストを走らせる
 - 温キャッシュで 1 run 5〜8 分
 
 ## 日常運用
@@ -34,3 +34,27 @@ TOKEN=$(gh api -X POST repos/chronista-club/ladyland/actions/runners/registratio
 確認: `gh api repos/chronista-club/ladyland/actions/runners --jq '.runners[] | "\(.name) \(.status)"'` が `makomac online` を返すこと。
 
 撤去: `./svc.sh stop && ./svc.sh uninstall && ./config.sh remove --token <除去トークン>`
+
+
+## 認証不要の AU と Gadget 互換性テスト
+
+既定の `IntegrationTests` は、テストプロセス内だけに登録する
+`TestInstrumentAU` をロードする。インストール・ライセンス認証・外部サンプルは不要。
+発音部は LadySynth を再利用し、Level パラメータと fullState、640×360 の
+リサイズ対応エディタを加えている。登録に失敗した場合はスキップせず失敗する。
+2つの component ID を使って差し替えと Draft の往復も確認する。
+
+これは実際の AUAudioUnit / AVAudioUnit / AVAudioEngine を通すテストだが、
+プロセス内 AU のため、AUv3 の別プロセス通信や WebView、ベンダー認証は検証しない。
+GUI セッションと使用可能な音声出力は引き続き必要。テストAUはアプリ本体には含めない。
+
+Gadget の元の9シナリオは `GadgetCompatibilityTests` として残し、既定では無効。
+Gadget のインストール・認証を確認したうえで、次のコマンドで明示実行する。
+指定時に必要なプラグインが無ければ失敗する。
+
+```sh
+LADYLAND_TEST_GADGET=1 swift test --package-path ladyland --filter GadgetCompatibilityTests
+```
+
+Gadget の認証ダイアログは自動操作で回避しない。認証待ち・ベンダー互換性の失敗と、
+認証不要のホスト回帰テストの結果を区別して記録する。

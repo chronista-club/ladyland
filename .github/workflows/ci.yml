@@ -2,9 +2,9 @@
 #
 # ⭐ 実行環境は **makomac の self-hosted runner**（mako 裁定 2026-08-09）。
 #   - private リポジトリの GitHub ホスト macOS は分数 10 倍課金で割に合わない
-#   - この Mac には Xcode 26.6 / 音声デバイス / KORG プラグインが揃っているので、
+#   - この Mac には Xcode / 音声デバイスがあり、認証不要のテスト専用AUで、
 #     実 AU 統合テスト（音量 0.02 の微音が鳴る）まで**全部走る** —
-#     クラウド runner では skip になる範囲もここでは検証できる
+#     Gadget互換性は LADYLAND_TEST_GADGET=1 の明示実行に分離する
 #
 # ⚠️ required check にはしていない — Mac がスリープ中でもマージは詰まらない。
 #   check が pending のままなら runner が寝ているだけ（docs/ci.md）。
