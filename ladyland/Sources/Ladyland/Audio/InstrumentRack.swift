@@ -292,19 +292,26 @@ final class InstrumentSlot: ObservableObject, Identifiable {
         }
     }
 
-    /// 現在の状態のスナップショット（空スロットでも棚があれば残す —
-    /// 昇格直後の工房（live 空・棚あり）の棚を失わないため）。
+    /// 現在の状態のスナップショット（空スロットでも棚・席の属性・既定が
+    /// あれば残す — 昇格直後の工房（live 空・棚あり）や、空にした席の
+    /// 色・名前・既定を再起動で失わないため）。
     /// fullState は**キャッシュを読む** — ここで AU に問い合わせない
     /// （常時保存が毎秒呼ぶ経路。節目の refreshStateCache が鮮度を担保）
     func snapshot() -> SlotSnapshot? {
         guard let unit = audioUnit else {
-            guard !drafts.isEmpty else { return nil }
-            // live は空だが棚は残す（component 識別 0 = 空印。復元側は
-            // ロードせず棚だけ戻す）
+            guard !drafts.isEmpty || defaultSnapshot != nil || rotoColor != nil
+                || customName != nil
+            else { return nil }
+            // live は空（component 識別 0 = 空印。復元側はロードせず
+            // 棚と席の属性だけ戻す）
             var snap = SlotSnapshot(
                 index: index, componentType: 0, componentSubType: 0,
                 componentManufacturer: 0, name: "", gain: gain, state: nil, knobs: nil)
-            snap.drafts = drafts
+            snap.mute = mute ? true : nil
+            snap.rotoColor = rotoColor
+            snap.customName = customName
+            snap.drafts = drafts.isEmpty ? nil : drafts
+            snap.defaultSnapshot = defaultSnapshot
             return snap
         }
         let desc = unit.audioComponentDescription
@@ -1098,18 +1105,8 @@ final class InstrumentRack: ObservableObject {
     func load(
         description: AudioComponentDescription, name: String, into slot: InstrumentSlot
     ) async throws {
-        // 差し替え時は旧ノードを外す。順序が重要:
-        // tap の除去（slot.detach 内）→ engine.detach。逆にすると
-        // 「NULL != engine」の NSException でクラッシュする
-        // （engine から外れたノードには removeTap できない）
-        if let old = slot.audioUnit {
-            // 暗黙 draft 生成（design/06 §8 Drafts）: 差し替えで今の音色が
-            // 消えない — 現在の姿を棚へ入れてから外す
-            slot.stashDraft()
-            slot.allNotesOff()
-            slot.detach()
-            engine.detach(old)
-        }
+        // 差し替え時は旧ノードを外す
+        unload(slot)
 
         let unit = try await AVAudioUnit.instantiate(with: description, options: [])
         guard unit is AVAudioUnitMIDIInstrument else {
@@ -1171,6 +1168,22 @@ final class InstrumentRack: ObservableObject {
         // ロード直後は音の節目 — fullState キャッシュをここで初期化する
         // （復元/draft 適用の場合は直後の applySnapshot/applyDraft が上書き）
         slot.refreshStateCache()
+    }
+
+    /// 席を空にする（差し替えの前半と共用。mako 要望 2026-09-23
+    /// 「右クリックで空にできるように」）。空の席では何もしない。
+    ///
+    /// 順序が重要: tap の除去（slot.detach 内）→ engine.detach。逆にすると
+    /// 「NULL != engine」の NSException でクラッシュする
+    /// （engine から外れたノードには removeTap できない）
+    func unload(_ slot: InstrumentSlot) {
+        guard let old = slot.audioUnit else { return }
+        // 暗黙 draft 生成（design/06 §8 Drafts）: 外しても今の音色が
+        // 消えない — 現在の姿を棚へ入れてから外す
+        slot.stashDraft()
+        slot.allNotesOff()
+        slot.detach()
+        engine.detach(old)
     }
 
     /// 全ロード済みスロットの fullState キャッシュを更新する
