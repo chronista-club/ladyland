@@ -1246,6 +1246,21 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// 席を空にする（タイルの右クリック。mako 要望 2026-09-23）。
+    /// 今の姿は draft として棚に残るので、タイルメニューから着せ直せる。
+    /// 席の属性（色・名前・既定・席色）は席に残る
+    func unload(_ slot: InstrumentSlot) {
+        guard slot.audioUnit != nil else { return }
+        // 差し替えと同じ作法: 死んだ view を残さない
+        if focusPaneIndex == slot.index {
+            focusPaneView = nil
+        }
+        editors.close(for: slot.index)
+        rack.unload(slot)
+        updateRouting()  // 割当が消える = 横取り集合も変わる
+        scheduleAutosave()  // [常時保存 29] 席を空にする
+    }
+
     /// タイル並び替え（番号バッジのドラッグ&ドロップ）: スロット中身の交換 →
     /// エディタウィンドウの担当替え → ルーティング同期。選択は楽器に追従する
     /// ため keyboard target の AU は変わらず、音は切れない
