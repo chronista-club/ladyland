@@ -2,7 +2,7 @@
 //!
 //! 昇格先の解決（純関数）と、棚の永続化 roundtrip / 後方互換。
 //! AU 実機が要るライフサイクル（暗黙 stash → 切替 → 昇格）は
-//! IntegrationTests 側（KORG がある環境のみ）。
+//! IntegrationTests 側（認証不要のテスト専用 AU）。
 
 import Foundation
 import Testing
