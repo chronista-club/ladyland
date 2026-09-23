@@ -115,7 +115,7 @@ final class AppState: ObservableObject {
     }
 
     /// **テンポ同期**（mako 裁定 2026-08-05「テンポ同期を切ることもできる」）。
-    /// 切ると `musicalContextBlock` を渡さない = プラグインが自前の既定
+    /// 切ると口が「分からない」と答える = プラグインが自前の既定
     /// （たいてい 120 BPM）で動く。**これがずっと続いていた状態**
     @Published var tempoSyncEnabled = true {
         didSet {
@@ -128,8 +128,7 @@ final class AppState: ObservableObject {
     /// いま AU へ渡しているテンポ（同期が切れていれば nil）
     private func applyTempoToInstruments() {
         let tempo = tempoSyncEnabled ? clockBPM : nil
-        for slot in rack.slots { slot.setMusicalTempo(tempo) }
-        rack.drumSlot.setMusicalTempo(tempo)
+        rack.setMusicalTempo(tempo)
     }
 
     /// **セルの色を変える**（割当パネルの行から。mako 要望 2026-08-05

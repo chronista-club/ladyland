@@ -151,47 +151,6 @@ final class InstrumentSlot: ObservableObject, Identifiable {
         displayName = name
         applyGain()
         installLevelTap(on: unit)
-        applyMusicalContext()
-    }
-
-    /// **ホストのテンポをプラグインへ渡す**（mako 裁定 2026-08-05）。
-    ///
-    /// ladyland は AUv3 ホストなのに `musicalContextBlock` を一度も渡して
-    /// いなかった。テンポ同期対応のプラグイン（Gadget のディレイ・LFO・
-    /// アルペジオ）は**自前の既定 120 BPM で動いていた** — 「同期を切った
-    /// 状態」がずっと続いていたことになる。
-    ///
-    /// ⚠️ このブロックは**レンダースレッドから呼ばれる**。ロックを取ると
-    /// 優先度逆転を招くので、**BPM をキャプチャした定数として焼き込み**、
-    /// テンポが変わったらブロックごと差し替える（AU 側が差し替えを同期する）
-    private var musicalTempo: Double?
-
-    /// テンポを差し替える。nil = 同期を切る（プラグインは自前の既定で動く）
-    func setMusicalTempo(_ bpm: Double?) {
-        guard musicalTempo != bpm else { return }
-        musicalTempo = bpm
-        applyMusicalContext()
-    }
-
-    private func applyMusicalContext() {
-        guard let unit = audioUnit?.auAudioUnit else { return }
-        guard let bpm = musicalTempo else {
-            unit.musicalContextBlock = nil
-            return
-        }
-        // 拍位置は渡さない（Clock からは「テンポ」しか取れない — 小節の頭が
-        // どこかは分からない）。tempo だけでもディレイと LFO は同期する
-        unit.musicalContextBlock = {
-            currentTempo, timeSignatureNumerator, timeSignatureDenominator,
-            currentBeatPosition, sampleOffsetToNextBeat, currentMeasureDownbeatPosition in
-            currentTempo?.pointee = bpm
-            timeSignatureNumerator?.pointee = 4
-            timeSignatureDenominator?.pointee = 4
-            currentBeatPosition?.pointee = 0
-            sampleOffsetToNextBeat?.pointee = 0
-            currentMeasureDownbeatPosition?.pointee = 0
-            return true
-        }
     }
 
     /// 中身を取り外して持ち出す（タイル並び替え用）。detach と違い
@@ -1093,6 +1052,15 @@ final class InstrumentRack: ObservableObject {
         }
     }
 
+    /// **ホストのテンポ**（全楽器で 1 つ。design は `HostTempo.swift`）。
+    /// nil = 同期を切る（プラグインは自前の既定で動く）
+    let hostTempo = HostTempo()
+
+    /// テンポを変える。AU の口は差し替えない — 口が毎回ここを読む
+    func setMusicalTempo(_ bpm: Double?) {
+        hostTempo.bpm = bpm
+    }
+
     /// 選択中スロットの参照
     var selectedSlot: InstrumentSlot { slots[selected] }
 
@@ -1115,6 +1083,9 @@ final class InstrumentRack: ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "\(name) は MIDI インストゥルメントではない"]
             )
         }
+        // テンポの口は**繋ぐ前に**渡す — render が始まってから差し替えると
+        // 別プロセスの AUv3 が落ちる（HostTempo.swift）
+        unit.auAudioUnit.musicalContextBlock = hostTempo.musicalContextBlock
         engine.attach(unit)
 
         // ⚠️ **レートを合わせるのは楽器の種類と無関係**（実測 2026-08-07）。
