@@ -68,6 +68,16 @@ final class TestInstrumentAU: AUAudioUnit, @unchecked Sendable {
         }
         level.value = 0.5
     }
+    /// Host-tempo block writes: total, and those made while render resources were
+    /// allocated (unsafe for out-of-process AUs — see HostTempoTests)
+    private(set) var musicalContextSets = 0
+    private(set) var musicalContextSetsWhileRendering = 0
+    override var musicalContextBlock: AUHostMusicalContextBlock? {
+        didSet {
+            musicalContextSets += 1
+            if renderResourcesAllocated { musicalContextSetsWhileRendering += 1 }
+        }
+    }
     override var outputBusses: AUAudioUnitBusArray { buses }
     override var parameterTree: AUParameterTree? {
         get { parameters }
