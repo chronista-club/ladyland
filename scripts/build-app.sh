@@ -19,7 +19,12 @@
 #   scripts/build-app.sh --install    # さらに /Applications へ配置
 #   scripts/build-app.sh --run        # 作ってそのまま起動
 #   scripts/build-app.sh --dist       # 配布物を作る（公証 + staple + DMG）
+#   scripts/build-app.sh --publish    # --dist + その tag の GitHub Release へ DMG を添付
 #   scripts/build-app.sh --reinstall  # 開発の輪: 終了 → ビルド → 差し替え → 起動
+#
+# --publish は **HEAD が tag の上にあるとき**だけ通す（`git describe --exact-match`）。
+# tag の無いビルドを tag の名前で配ると「どの版か」が追えなくなる。Release が
+# 無ければ作る（`-` を含む tag は pre-release）。既存の asset は --clobber で差し替え。
 #
 # --reinstall は「今動いているのを正しく終わらせてから入れ替える」ための道。
 # ⚠️ kill ではなく **AppleScript quit** を使う — willTerminate が走らないと
@@ -34,7 +39,7 @@
 # 公証には資格情報の登録が一度だけ必要（対話。ここでは実行しない）:
 #   xcrun notarytool store-credentials "ladyland" \
 #       --apple-id <Apple ID> --team-id 3EQKG4B352 --password <アプリ用パスワード>
-#   ※ アプリ用パスワードは appleid.apple.com → サインインとセキュリティ で発行
+#   ※ アプリ用パスワードは account.apple.com → サインインとセキュリティ で発行
 #
 # 対象は **arm64 のみ**（mako 裁定 2026-08-02）。Intel Mac では動かない。
 
@@ -50,16 +55,36 @@ NOTARY_PROFILE="${LADYLAND_NOTARY_PROFILE:-ladyland}"
 INSTALL=0
 RUN=0
 MAKE_DIST=0
+PUBLISH=0
 REINSTALL=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL=1 ;;
         --run) RUN=1 ;;
         --dist) MAKE_DIST=1 ;;
+        --publish) PUBLISH=1; MAKE_DIST=1 ;;
         --reinstall) REINSTALL=1; INSTALL=1 ;;
         *) echo "不明な引数: $arg" >&2; exit 2 ;;
     esac
 done
+
+if [ "$PUBLISH" = "1" ]; then
+    # 前提は**ビルドの前に**全部確かめる — 公証まで済んでから落ちると数分が無駄になる
+    RELEASE_TAG="$(git -C "$REPO_ROOT" describe --tags --exact-match 2>/dev/null || true)"
+    if [ -z "$RELEASE_TAG" ]; then
+        echo "--publish は tag の上でだけ使えます（HEAD に tag が無い）。" >&2
+        echo "  git checkout main && git describe --tags --exact-match で確かめてください" >&2
+        exit 1
+    fi
+    if [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
+        echo "--publish: 作業ツリーに未コミットの変更があります（tag と違う中身を配ってしまう）" >&2
+        exit 1
+    fi
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "--publish: gh が未認証です（gh auth login）" >&2
+        exit 1
+    fi
+fi
 
 # --reinstall: ビルドの前に、走っているアプリを**正しく**終わらせる。
 # ⚠️ dist と /Applications の同名バンドルが併存すると、名前指定の quit は
@@ -199,7 +224,7 @@ if [ "$MAKE_DIST" = "1" ]; then
       --team-id 3EQKG4B352 \\
       --password <アプリ用パスワード>
 
-  ※ アプリ用パスワードは appleid.apple.com → サインインとセキュリティ →
+  ※ アプリ用パスワードは account.apple.com → サインインとセキュリティ →
      アプリ用パスワード で発行します（Apple ID 本体のパスワードではありません）
 
 登録後にもう一度 scripts/build-app.sh --dist を実行してください。
@@ -228,6 +253,27 @@ GUIDE
     hdiutil create -volname "Ladyland" -srcfolder "$STAGE" -ov -format UDZO "$DMG" \
         >/dev/null
     rm -rf "$(dirname "$STAGE")"
+
+    # DMG 自体も署名 → 公証 → staple する。中の .app だけでは
+    # `spctl -t install` が "no usable signature" で DMG を蹴る（実測 2026-09-12、v0.1.0）
+    echo "==> DMG を署名して公証へ提出"
+    codesign --sign "$IDENTITY" --timestamp "$DMG" 2>&1 | sed 's/^/    /'
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 | sed 's/^/    /'
+    xcrun stapler staple "$DMG" 2>&1 | sed 's/^/    /'
+    spctl -a -t install "$DMG" 2>&1 | sed 's/^/    /' || { echo "DMG の検証に失敗" >&2; exit 1; }
+
+    if [ "$PUBLISH" = "1" ]; then
+        echo "==> GitHub Release $RELEASE_TAG へ添付"
+        if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            PRERELEASE=()
+            case "$RELEASE_TAG" in *-*) PRERELEASE=(--prerelease) ;; esac
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes \
+                "${PRERELEASE[@]}" >/dev/null
+            echo "    Release を新規作成（notes は自動生成 — 後で整える）"
+        fi
+        gh release upload "$RELEASE_TAG" "$DMG" --clobber >/dev/null
+        echo "    $(gh release view "$RELEASE_TAG" --json url -q .url)"
+    fi
 
     echo "==> 配布物ができました"
     echo "    $DMG"

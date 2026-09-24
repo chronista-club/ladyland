@@ -115,7 +115,7 @@ final class AppState: ObservableObject {
     }
 
     /// **テンポ同期**（mako 裁定 2026-08-05「テンポ同期を切ることもできる」）。
-    /// 切ると `musicalContextBlock` を渡さない = プラグインが自前の既定
+    /// 切ると口が「分からない」と答える = プラグインが自前の既定
     /// （たいてい 120 BPM）で動く。**これがずっと続いていた状態**
     @Published var tempoSyncEnabled = true {
         didSet {
@@ -128,8 +128,7 @@ final class AppState: ObservableObject {
     /// いま AU へ渡しているテンポ（同期が切れていれば nil）
     private func applyTempoToInstruments() {
         let tempo = tempoSyncEnabled ? clockBPM : nil
-        for slot in rack.slots { slot.setMusicalTempo(tempo) }
-        rack.drumSlot.setMusicalTempo(tempo)
+        rack.setMusicalTempo(tempo)
     }
 
     /// **セルの色を変える**（割当パネルの行から。mako 要望 2026-08-05
@@ -1244,6 +1243,21 @@ final class AppState: ObservableObject {
                 startupError = "ロード失敗: \(component.name) — \(error.localizedDescription)"
             }
         }
+    }
+
+    /// 席を空にする（タイルの右クリック。mako 要望 2026-09-23）。
+    /// 今の姿は draft として棚に残るので、タイルメニューから着せ直せる。
+    /// 席の属性（色・名前・既定・席色）は席に残る
+    func unload(_ slot: InstrumentSlot) {
+        guard slot.audioUnit != nil else { return }
+        // 差し替えと同じ作法: 死んだ view を残さない
+        if focusPaneIndex == slot.index {
+            focusPaneView = nil
+        }
+        editors.close(for: slot.index)
+        rack.unload(slot)
+        updateRouting()  // 割当が消える = 横取り集合も変わる
+        scheduleAutosave()  // [常時保存 29] 席を空にする
     }
 
     /// タイル並び替え（番号バッジのドラッグ&ドロップ）: スロット中身の交換 →

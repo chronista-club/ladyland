@@ -10,6 +10,7 @@
 //! ウィンドウで編集中はそちらが優先で、focus pane はプレースホルダに退く。
 
 import AppKit
+import CoreAudioKit
 import CreoUI
 import SwiftUI
 
@@ -55,13 +56,15 @@ enum FocusPaneFit {
 }
 
 /// 借りてきたプラグイン view を収める AppKit コンテナ。
-/// 縮小は wrapper の frame（縮小後）/ bounds（ネイティブ）の座標変換で行う —
-/// 描画もマウスイベントも AppKit が正しく写像する（layer transform と違い
-/// クリック位置がズレない）
+/// AU が fitted size をサポートする場合は view 自体をリサイズする。
+/// 非対応の場合のみ wrapper の frame / bounds の座標変換で比例拡縮する。
 final class FocusPaneContainerView: NSView {
     private(set) var hosted: NSView?
     private let wrapper = NSView()
     private var nativeSize: CGSize = .zero
+    private weak var audioUnit: AUAudioUnit?
+    private var lastProposedSize: CGSize?
+    private var resizesView = false
 
     /// 左上原点で扱う（FocusPaneFit は左上原点で frame を返す）
     override var isFlipped: Bool { true }
@@ -78,9 +81,19 @@ final class FocusPaneContainerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func host(_ view: NSView?) {
-        guard view !== hosted else { return }
-        hosted?.removeFromSuperview()
+    func host(_ view: NSView?, audioUnit: AUAudioUnit? = nil) {
+        guard view !== hosted || audioUnit !== self.audioUnit else { return }
+        if view !== hosted {
+            // A separate editor may already have reclaimed the view.
+            if let hosted, hosted.superview === wrapper {
+                hosted.removeFromSuperview()
+                hosted.setFrameSize(nativeSize)
+            }
+        }
+        self.audioUnit = audioUnit
+        lastProposedSize = nil
+        resizesView = false
+        let sameView = view === hosted
         hosted = view
         guard let view else {
             needsLayout = true
@@ -91,7 +104,7 @@ final class FocusPaneContainerView: NSView {
         if size.width < 1 || size.height < 1 {
             size = view.fittingSize
         }
-        nativeSize = size
+        if !sameView { nativeSize = size }
         // ウィンドウ contentView 由来の autoresizing を切る — 残っていると
         // wrapper の bounds 変更に追従して view 自身が伸縮し、縮小写像が壊れる
         view.translatesAutoresizingMaskIntoConstraints = true
@@ -102,25 +115,43 @@ final class FocusPaneContainerView: NSView {
 
     override func layout() {
         super.layout()
-        guard let hosted, nativeSize.width > 0, nativeSize.height > 0 else { return }
-        // frame（縮小後）と bounds（ネイティブ）の食い違いが縮小写像そのもの。
-        // 描画もマウス座標も AppKit が変換する（layer transform と違いズレない）
+        guard let hosted, hosted.superview === wrapper,
+              nativeSize.width > 0, nativeSize.height > 0 else { return }
+        // 比率と中央寄せは両方式で共通。AU の名前による特例は作らない。
         let fit = FocusPaneFit.fit(native: nativeSize, in: bounds.size)
+        guard fit.frame.width > 0, fit.frame.height > 0 else { return }
+        if lastProposedSize != fit.frame.size {
+            lastProposedSize = fit.frame.size
+            let configuration = AUAudioUnitViewConfiguration(
+                width: fit.frame.width, height: fit.frame.height, hostHasController: false)
+            resizesView = audioUnit?.supportedViewConfigurations([configuration]).contains(0) == true
+            if resizesView {
+                audioUnit?.select(configuration)
+            }
+        }
+        // Responsive AUs lay out their own content at the fitted size. Scaling
+        // their remote parent as well can clip or double-scale the WebView.
+        let contentSize = resizesView ? fit.frame.size : nativeSize
         wrapper.frame = fit.frame
-        wrapper.bounds = CGRect(origin: .zero, size: nativeSize)
-        hosted.frame = CGRect(origin: .zero, size: nativeSize)
+        wrapper.bounds = CGRect(origin: .zero, size: contentSize)
+        hosted.frame = CGRect(origin: .zero, size: contentSize)
     }
 }
 
 struct FocusPaneHost: NSViewRepresentable {
     let hosted: NSView?
+    var audioUnit: AUAudioUnit? = nil
 
     func makeNSView(context: Context) -> FocusPaneContainerView {
         FocusPaneContainerView()
     }
 
     func updateNSView(_ view: FocusPaneContainerView, context: Context) {
-        view.host(hosted)
+        view.host(hosted, audioUnit: audioUnit)
+    }
+
+    static func dismantleNSView(_ view: FocusPaneContainerView, coordinator: ()) {
+        view.host(nil)
     }
 }
 
@@ -142,9 +173,16 @@ struct FocusPaneView: View {
         ZStack {
             RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
                 .fill(theme.surfaceSurface)
+                // 枠は背景側で描く。ペイン全体への overlay は、ヒットテストを
+                // 無効にしても AUv3 の WebView 入力を妨げる（MediSynth 実機確認）。
+                .overlay(
+                    RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
+                        .stroke(theme.surfaceBorderSubtle, lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
             switch mode {
             case .hosting:
-                FocusPaneHost(hosted: hosted)
+                FocusPaneHost(hosted: hosted, audioUnit: slot.audioUnit?.auAudioUnit)
                     .padding(4)
             case .empty:
                 Label("空トラック — タイルのメニューからロード", systemImage: "square.dashed")
@@ -158,10 +196,6 @@ struct FocusPaneView: View {
                 placeholder(text: "プラグイン画面を準備中…", icon: nil, action: nil)
             }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
-                .stroke(theme.surfaceBorderSubtle, lineWidth: 1)
-        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

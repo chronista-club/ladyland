@@ -13,7 +13,7 @@ xcrun notarytool store-credentials "ladyland" \
     --password <アプリ用パスワード>
 ```
 
-**アプリ用パスワード**は appleid.apple.com → サインインとセキュリティ → アプリ用パスワード
+**アプリ用パスワード**は account.apple.com → サインインとセキュリティ → アプリ用パスワード
 で発行する（Apple ID 本体のパスワードではない）。証明書は
 `Developer ID Application: Anycreative Inc. (3EQKG4B352)` を使う — 既に手元にある。
 
@@ -21,8 +21,16 @@ xcrun notarytool store-credentials "ladyland" \
 
 ```bash
 scripts/build-app.sh --dist
-# → dist/Ladyland-0.1.0.dmg
+# → dist/Ladyland-v0.1.0.dmg
+
+scripts/build-app.sh --publish
+# → 同じことをして、その tag の GitHub Release に DMG を添付する
+#    （Release が無ければ作る。HEAD が tag の上・作業ツリーが clean・gh 認証済み、が前提）
 ```
+
+リリースの流れは `release` スキル（nightly → main、tag、GitHub Release）のあとに
+`git checkout main && scripts/build-app.sh --publish`。受け取る側は Release ページの
+`Ladyland-vX.Y.Z.dmg` を落として /Applications へ入れるだけ。
 
 中でやっていること:
 
@@ -32,6 +40,7 @@ scripts/build-app.sh --dist
 4. **公証へ提出して結果を待つ**（数分）
 5. **staple** — 結果をアプリ本体に貼る。相手がオフラインでも検証が通る
 6. **DMG** — 「Applications へドラッグ」の見慣れた形にする
+7. **DMG も署名 → 公証 → staple**（中の .app だけだと Gatekeeper の `-t install` 検証で蹴られる）
 
 ## なぜ公証が要るのか
 

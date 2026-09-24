@@ -662,6 +662,14 @@ struct ContentView: View {
                                     appState.secondKeyboardSlot = slot.index
                                 }
                             }
+                            // 席を空にする（今の姿は draft として棚に残る —
+                            // タイルメニューから着せ直せる）
+                            if slot.audioUnit != nil {
+                                Divider()
+                                Button("音源を外す（空にする）", role: .destructive) {
+                                    appState.unload(slot)
+                                }
+                            }
                         }
                         .background(TileFrameReader(index: slot.index))
                         .zIndex(tileZIndex(for: slot.index))

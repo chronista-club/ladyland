@@ -1,11 +1,12 @@
-//! 実プラグイン統合テスト（cortex の test_korg_synth_midi 相当）。
+//! 認証不要のプロセス内 AU によるホスト統合テスト。
 //!
-//! 実機の AU 構成に依存するため、KORG が無い環境では黙ってスキップする。
+//! テスト専用 AU を実カタログ・ロード経路へ登録する。不在は失敗扱い。
 //! 実行時は実際に音が出る（出力は OS 既定 or L6max）。
 //!
 //! 検証する経路: カタログ → ロード → MIDI 送信 → 発音（RMS）→
 //! fullState スナップショット → 復元。P1/P2 の背骨がまとめて通る。
 
+import AppKit
 import AVFoundation
 import Testing
 
@@ -14,6 +15,7 @@ import Testing
 @Suite("実 AU 統合", .serialized)
 @MainActor
 struct IntegrationTests {
+    init() { TestInstrumentAU.register() }
     /// テスト中の実音を極力小さくする（mako 裁定 2026-08-01「テストの音が
     /// 出過ぎ」）。mainMixer の出力段で約 -34dB に絞る — RMS タップは
     /// mainMixer（絞り後）なのでしきい値も同率縮小済み。スロット側の
@@ -38,11 +40,11 @@ struct IntegrationTests {
     @Test("MIDI モードの席 CC が割当パラメータに効く")
     func seatCCAppliesToParameter() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.name.contains("Memphis") })
-        else { return }  // KORG 未インストール環境ではスキップ
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
-        try await rack.load(korg, into: rack.slots[0])
+        try await rack.load(tone, into: rack.slots[0])
         let param = try #require(
             rack.slots[0].parameterList.first(where: { $0.maxValue > $0.minValue }))
         rack.slots[0].knobMappings = [
@@ -60,14 +62,11 @@ struct IntegrationTests {
     @Test("ロード → ノートオン → 発音（RMS > 0）→ 切替作法で消音")
     func loadPlayAndRelease() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.name.contains("Memphis") })
-        else {
-            // KORG 未インストール環境ではスキップ
-            return
-        }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
-        try await rack.load(korg, into: rack.slots[0])
+        try await rack.load(tone, into: rack.slots[0])
 
         // mixer 出力の RMS を収集
         let collector = RMSCollector()
@@ -94,14 +93,14 @@ struct IntegrationTests {
         rack.engine.stop()
     }
 
-    @Test("ドラムスロット経路 — London をロードしてドラムノートで発音")
+    @Test("ドラムスロット経路 — テスト AU をロードしてドラムノートで発音")
     func drumSlotPath() async throws {
         let rack = InstrumentRack()
-        guard let london = rack.catalog.first(where: { $0.name.contains("London") })
-        else { return }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
-        try await rack.load(london, into: rack.drumSlot)
+        try await rack.load(tone, into: rack.drumSlot)
 
         let collector = RMSCollector()
         rack.engine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) {
@@ -122,18 +121,18 @@ struct IntegrationTests {
         rack.engine.stop()
     }
 
-    @Test("ロード済みスロットへの差し替え — 別のガジェットに入れ替えて発音")
+    @Test("ロード済みスロットへの差し替え — 別のテスト AU に入れ替えて発音")
     func reloadIntoOccupiedSlot() async throws {
         let rack = InstrumentRack()
-        let korgs = rack.catalog.filter { $0.manufacturer.contains("KORG") }
-        guard korgs.count >= 2 else { return }
+        let tones = try await [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
 
         // 1 台目をロード → 2 台目に差し替え（レベル tap が付いた状態の detach 経路）
-        try await rack.load(korgs[0], into: rack.drumSlot)
-        try await rack.load(korgs[1], into: rack.drumSlot)
-        #expect(rack.drumSlot.displayName == korgs[1].name)
+        try await rack.load(tones[0], into: rack.drumSlot)
+        try await rack.load(tones[1], into: rack.drumSlot)
+        #expect(rack.drumSlot.displayName == tones[1].name)
 
         // 差し替え後も発音できること
         let collector = RMSCollector()
@@ -177,6 +176,7 @@ struct IntegrationTests {
         guard let sampler = rack.catalog.first(where: { $0.name == LadySampler.displayName })
         else { return }  // 自作 AU が登録されていない環境ではスキップ
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(sampler, into: rack.drumSlot)
 
@@ -223,6 +223,7 @@ struct IntegrationTests {
                 rackCatalogEntry(named: name), "\(name) がカタログに出ていない")
             let rack = InstrumentRack()
             try rack.start()
+        defer { rack.engine.stop() }
             quiet(rack)
             try await rack.load(component, into: rack.drumSlot)
             let unit = try #require(rack.drumSlot.audioUnit?.auAudioUnit)
@@ -259,6 +260,7 @@ struct IntegrationTests {
             rackCatalogEntry(named: name), "\(name) がカタログに出ていない")
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(component, into: rack.drumSlot)
         let unit = try #require(
@@ -299,6 +301,7 @@ struct IntegrationTests {
             rackCatalogEntry(named: name), "\(name) がカタログに出ていない")
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(component, into: rack.drumSlot)
         // ⚠️ **ここで followOutputRate() を呼ばない**（呼べば当然揃う）
@@ -322,6 +325,7 @@ struct IntegrationTests {
 
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         let sampler = try #require(rackCatalogEntry(named: LadySampler.displayName))
         let synth = try #require(rackCatalogEntry(named: LadySynth.displayName))
@@ -415,6 +419,7 @@ struct IntegrationTests {
         guard let sampler = rack.catalog.first(where: { $0.name == LadySampler.displayName })
         else { return }
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(sampler, into: rack.drumSlot)
 
@@ -440,6 +445,7 @@ struct IntegrationTests {
         guard let entry = rack.catalog.first(where: { $0.name == LadySampler.displayName })
         else { return }
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(entry, into: rack.drumSlot)
         let sampler = try #require(rack.drumSlot.audioUnit?.auAudioUnit as? LadySampler)
@@ -467,6 +473,7 @@ struct IntegrationTests {
         guard let entry = rack.catalog.first(where: { $0.name == LadySampler.displayName })
         else { return }
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(entry, into: rack.drumSlot)
         let sampler = try #require(rack.drumSlot.audioUnit?.auAudioUnit as? LadySampler)
@@ -495,6 +502,7 @@ struct IntegrationTests {
         let rack = InstrumentRack()
         try rack.start()
         defer { rack.engine.stop() }
+        defer { rack.engine.stop() }
 
         #expect(rack.engine.isRunning, "起動できること（第一要件）")
         #expect(rack.engine.mainMixerNode.outputFormat(forBus: 0).sampleRate > 0)
@@ -518,6 +526,7 @@ struct IntegrationTests {
 
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
         defer { rack.engine.stop() }
 
         #expect(rack.engine.isRunning, "明示フォーマットでも起動できること")
@@ -549,6 +558,7 @@ struct IntegrationTests {
         let rack = InstrumentRack()
         try rack.start()
         defer { rack.engine.stop() }
+        defer { rack.engine.stop() }
 
         #expect(rack.engine.isRunning, "揃え直しの後もエンジンが走っている")
         let device = rack.engine.outputNode.outputFormat(forBus: 0).sampleRate
@@ -574,6 +584,7 @@ struct IntegrationTests {
         let rack = InstrumentRack()
         try rack.start()
         defer { rack.engine.stop() }
+        defer { rack.engine.stop() }
         let settled = rack.engine.mainMixerNode.outputFormat(forBus: 0).sampleRate
 
         // 2 回目の追従（`followOutputRate` が同じ揃え直しを通る）
@@ -597,6 +608,7 @@ struct IntegrationTests {
         guard let sampler = rack.catalog.first(where: { $0.name == LadySampler.displayName })
         else { return }
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
         try await rack.load(sampler, into: rack.drumSlot)
 
@@ -617,10 +629,12 @@ struct IntegrationTests {
     @Test("スナップショット → 別ラックへ復元 — 楽器と gain が戻る")
     func snapshotRestore() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.manufacturer.contains("KORG") })
-        else { return }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
-        try await rack.load(korg, into: rack.slots[2])
+        defer { rack.engine.stop() }
+        try await rack.load(tone, into: rack.slots[2])
+        rack.slots[2].parameterList.first?.value = 0.37
+        rack.slots[2].refreshStateCache()
         rack.slots[2].gain = 0.42
         rack.select(2)
 
@@ -634,19 +648,21 @@ struct IntegrationTests {
         let restored = InstrumentRack()
         try restored.start()
         await restored.restore(from: snapshot)
-        #expect(restored.slots[2].displayName == korg.name)
+        #expect(restored.slots[2].displayName == tone.name)
         #expect(restored.slots[2].gain == 0.42)
         #expect(restored.selected == 2)
+        let restoredLevel = try #require(restored.slots[2].parameterList.first)
+        #expect(abs(restoredLevel.value - 0.37) < 0.001)
         restored.engine.stop()
     }
 
     @Test("差し替え後のオフスクリーン自動サムネ — 実 AU の顔が撮れる")
     func offscreenThumbnailRefresh() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.manufacturer.contains("KORG") })
-        else { return }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
-        try await rack.load(korg, into: rack.slots[0])
+        defer { rack.engine.stop() }
+        try await rack.load(tone, into: rack.slots[0])
         let unit = try #require(rack.slots[0].audioUnit)
 
         let dir = FileManager.default.temporaryDirectory
@@ -674,10 +690,10 @@ struct IntegrationTests {
     @Test("画面外撮影の店じまい後にエディタを開き直せる（実機バグ再現）")
     func reopenAfterOffscreenClose() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.manufacturer.contains("KORG") })
-        else { return }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
-        try await rack.load(korg, into: rack.slots[0])
+        defer { rack.engine.stop() }
+        try await rack.load(tone, into: rack.slots[0])
 
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ladyland-thumbs-\(UUID().uuidString)")
@@ -706,10 +722,10 @@ struct IntegrationTests {
     @Test("focus pane custody — 借用 → ウィンドウへ返却 → 開き直し（VC 1 回制約下）")
     func focusPaneCustodyLifecycle() async throws {
         let rack = InstrumentRack()
-        guard let korg = rack.catalog.first(where: { $0.manufacturer.contains("KORG") })
-        else { return }
+        let tone = try await TestInstrumentAU.component(in: rack)
         try rack.start()
-        try await rack.load(korg, into: rack.slots[0])
+        defer { rack.engine.stop() }
+        try await rack.load(tone, into: rack.slots[0])
 
         let editors = PluginEditorWindows()
 
@@ -723,12 +739,18 @@ struct IntegrationTests {
         #expect(ready, "VC が届くこと")
 
         // 届いたら借りられる（custody は focus pane 側、ウィンドウは隠れる）
-        let view = editors.borrowFocusPaneView(for: rack.slots[0])
-        #expect(view != nil, "focus pane が view を借りられること")
+        let view = try #require(editors.borrowFocusPaneView(for: rack.slots[0]))
+        let pane = FocusPaneContainerView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        pane.host(view, audioUnit: rack.slots[0].audioUnit?.auAudioUnit)
+        pane.layout()
+        #expect(view.frame.size == NSSize(width: 320, height: 180))
+        pane.setFrameSize(NSSize(width: 480, height: 360))
+        pane.layout()
+        #expect(view.frame.size == NSSize(width: 480, height: 270))
         #expect(!editors.isOpenOnScreen(0), "貸出中はウィンドウは隠れている")
 
         // アイコンで開く = 返却してからウィンドウが前面へ（VC は再要求されない —
-        // KORG AU は 2 回目の requestViewController に nil を返すため、
+        // テスト AU も 2 回目の requestViewController に nil を返すため、
         // ここで開ければ custody の返却が正しく機能している証拠）
         editors.open(for: rack.slots[0])
         var opened = false
@@ -737,6 +759,8 @@ struct IntegrationTests {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(opened, "返却後にウィンドウで開けること")
+        pane.host(nil)
+        #expect(view.window != nil, "旧ペインの解除が別窓からビューを取り去らない")
         #expect(
             editors.borrowFocusPaneView(for: rack.slots[0]) == nil,
             "ウィンドウ表示中は借りられない（そちらが優先）")
@@ -747,39 +771,39 @@ struct IntegrationTests {
     @Test("Drafts — 差し替えで棚に残り、切替で戻り、昇格で舞台へ移る")
     func draftLifecycle() async throws {
         let rack = InstrumentRack()
-        let korgs = rack.catalog.filter { $0.manufacturer.contains("KORG") }
-        guard korgs.count >= 2 else { return }
+        let tones = try await [TestInstrumentAU.component(in: rack), TestInstrumentAU.component(in: rack, index: 1)]
         try rack.start()
+        defer { rack.engine.stop() }
         quiet(rack)
 
         // 差し替え → 前の姿が暗黙で棚に入る（音色が消えない）
-        try await rack.load(korgs[0], into: rack.slots[0])
+        try await rack.load(tones[0], into: rack.slots[0])
         #expect(rack.slots[0].drafts.isEmpty)
-        try await rack.load(korgs[1], into: rack.slots[0])
-        #expect(rack.slots[0].drafts.map(\.name) == [korgs[0].name])
+        try await rack.load(tones[1], into: rack.slots[0])
+        #expect(rack.slots[0].drafts.map(\.name) == [tones[0].name])
 
         // 棚の draft を着る → 今の姿と入れ替わる（無損失の往復）
         let stashed = try #require(rack.slots[0].drafts.first)
         await rack.activateDraft(withID: stashed.id, on: rack.slots[0])
-        #expect(rack.slots[0].displayName == korgs[0].name)
-        #expect(rack.slots[0].drafts.map(\.name) == [korgs[1].name])
+        #expect(rack.slots[0].displayName == tones[0].name)
+        #expect(rack.slots[0].drafts.map(\.name) == [tones[1].name])
 
         // 昇格（Cmd+Return 相当）→ live が空席へ移り選択も移る。
-        // 工房は棚の最新（korgs[1]）を着せ直し、棚は空になる
+        // 工房は棚の最新（tones[1]）を着せ直し、棚は空になる
         rack.select(0)
         let target = await rack.promoteActiveDraft()
         #expect(target == 1)
         #expect(rack.selected == 1)
-        #expect(rack.slots[1].displayName == korgs[0].name, "昇格した音が舞台に立つ")
+        #expect(rack.slots[1].displayName == tones[0].name, "昇格した音が舞台に立つ")
         #expect(rack.slots[1].drafts.isEmpty, "棚は工房に残る — 舞台には付いていかない")
-        #expect(rack.slots[0].displayName == korgs[1].name, "工房は棚の最新を着せ直す")
+        #expect(rack.slots[0].displayName == tones[1].name, "工房は棚の最新を着せ直す")
         #expect(rack.slots[0].drafts.isEmpty)
 
         // 棚つきの状態が snapshot に残ることも一周確認
-        try await rack.load(korgs[1], into: rack.slots[1])  // korgs[0] が棚へ
+        try await rack.load(tones[1], into: rack.slots[1])  // tones[0] が棚へ
         let snap = rack.snapshot()
         let slot1 = try #require(snap.slots.first { $0.index == 1 })
-        #expect(slot1.drafts?.map(\.name) == [korgs[0].name])
+        #expect(slot1.drafts?.map(\.name) == [tones[0].name])
 
         rack.engine.stop()
     }
@@ -788,6 +812,7 @@ struct IntegrationTests {
     func masterLimiterInChain() throws {
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
         #expect(rack.engine.attachedNodes.contains(rack.masterLimiter))
         // 暗黙の mainMixer → output 接続が limiter 経由に置き換わっていること
         let destination = rack.engine.outputConnectionPoints(
@@ -805,6 +830,7 @@ struct IntegrationTests {
 
         let rack = InstrumentRack()
         try rack.start()
+        defer { rack.engine.stop() }
 
         // 既定デバイス（= 今鳴っているデバイス）への切替で経路の生存を検証する
         let target = devices.first { $0.id == OutputDevice.defaultOutputID() } ?? devices[0]
@@ -823,7 +849,7 @@ struct IntegrationTests {
 }
 
 /// テスト用の RMS 収集器（audio tap スレッドから書かれる）
-private final class RMSCollector: @unchecked Sendable {
+final class RMSCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var _maxRMS: Float = 0
 

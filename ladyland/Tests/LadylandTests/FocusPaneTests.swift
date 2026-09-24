@@ -4,6 +4,9 @@
 //! から view を借りる（custody）。ここでは表示状態の決定と、view を領域に
 //! 収める fit 計算（純関数）をピン留めする。
 
+import AppKit
+import CoreAudioKit
+import SwiftUI
 import Testing
 
 @testable import Ladyland
@@ -77,5 +80,135 @@ struct FocusPaneFitTests {
         #expect(FocusPaneFit.fit(native: .zero, in: .init(width: 100, height: 100)).frame == .zero)
         #expect(
             FocusPaneFit.fit(native: .init(width: 100, height: 100), in: .zero).frame == .zero)
+    }
+}
+
+// mem_1CfGrPJYSvy8xFk3eZf4Ra: responsive AU views must receive the fitted size.
+private final class ResizingTestUnit: AUAudioUnit {
+    var acceptsResize = true
+    var selections: [CGSize] = []
+    override func supportedViewConfigurations(_ configurations: [AUAudioUnitViewConfiguration]) -> IndexSet {
+        acceptsResize ? IndexSet(integersIn: configurations.indices) : []
+    }
+    override func select(_ configuration: AUAudioUnitViewConfiguration) {
+        selections.append(CGSize(width: configuration.width, height: configuration.height))
+    }
+}
+
+@Suite("focus pane AU view sizing")
+@MainActor
+struct FocusPaneContainerTests {
+    private func unit() throws -> ResizingTestUnit {
+        try ResizingTestUnit(componentDescription: AudioComponentDescription(
+            componentType: 0x61756d75, componentSubType: 0x74657374,
+            componentManufacturer: 0x74657374, componentFlags: 0, componentFlagsMask: 0))
+    }
+
+    @Test("対応AUはframeをリサイズし、親の座標拡縮を重ねない")
+    func responsiveView() throws {
+        let au = try unit()
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 664, height: 500))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 1328, height: 747))
+        container.host(view, audioUnit: au)
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 664, height: 373.5))
+        #expect(view.superview?.bounds.size == view.superview?.frame.size)
+        #expect(au.selections == [CGSize(width: 664, height: 373.5)])
+        container.layout()
+        #expect(au.selections.count == 1)
+        container.setFrameSize(CGSize(width: 332, height: 500))
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 332, height: 186.75))
+        #expect(au.selections.count == 2)
+    }
+
+    @Test("別窓が回収したビューを古いペインのlayoutや解除が変更しない")
+    func reclaimedView() throws {
+        let au = try unit()
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 450, height: 300))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        container.host(view, audioUnit: au)
+        container.layout()
+        let editor = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        editor.addSubview(view)
+        view.frame = editor.bounds
+        container.layout()
+        #expect(view.frame == editor.bounds)
+        container.host(nil)
+        #expect(view.superview === editor)
+    }
+
+    @Test("非対応AUは元のサイズと従来の比例縮小を維持する")
+    func fixedView() throws {
+        let au = try unit()
+        au.acceptsResize = false
+        let container = FocusPaneContainerView(frame: CGRect(x: 0, y: 0, width: 450, height: 300))
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        container.host(view, audioUnit: au)
+        container.layout()
+        #expect(view.frame.size == CGSize(width: 900, height: 600))
+        #expect(view.superview?.frame.size == CGSize(width: 450, height: 300))
+        #expect(au.selections.isEmpty)
+    }
+}
+
+/// 実測 2026-09-23（スタジオ練習）: Lady MPE のトラックへ切り替えると
+/// `NSGenericException`（Update Constraints in Window のパスが尽きない）で落ちた。
+/// Lady MPE の画面は NSHostingController で、既定の sizingOptions だと SwiftUI が
+/// 最小・最大サイズを**制約**として張る。focus pane は frame / bounds で縮小表示する
+/// ので両者がぶつかり、窓のレイアウトが収束しない。
+/// 実物の部品（ラック・プラグイン窓・focus pane）で切り替えを通す — 落ちれば赤
+@Suite("focus pane 実物の切り替え", .serialized)
+@MainActor
+struct FocusPaneSwitchTests {
+    @MainActor
+    private final class Pane: ObservableObject {
+        @Published var view: NSView?
+        @Published var unit: AUAudioUnit?
+    }
+
+    private struct Root: View {
+        @ObservedObject var pane: Pane
+        var body: some View {
+            FocusPaneHost(hosted: pane.view, audioUnit: pane.unit).padding(4)
+        }
+    }
+
+    @Test("自作楽器の画面を載せ替えてもレイアウトが収束する", arguments: [
+        LadySynth.displayName, LadySampler.displayName,
+    ])
+    func switchToBuiltInEditor(name: String) async throws {
+        let rack = InstrumentRack()
+        try rack.start()
+        defer { rack.engine.stop() }
+        rack.engine.mainMixerNode.outputVolume = 0
+        let component = try #require(rack.catalog.first { $0.name == name })
+        try await rack.load(component, into: rack.slots[0])
+        let slot = rack.slots[0]
+
+        let editors = PluginEditorWindows()
+        var ready = false
+        editors.onViewReady = { _ in ready = true }
+        _ = editors.borrowFocusPaneView(for: slot)  // 1 回目は取得を蹴るだけ
+        for _ in 0..<100 where !ready { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(ready, "\(name) の画面が届かない")
+
+        let pane = Pane()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 420),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: Root(pane: pane))
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        for _ in 0..<3 {
+            pane.view = try #require(editors.borrowFocusPaneView(for: slot))
+            pane.unit = slot.audioUnit?.auAudioUnit
+            try await Task.sleep(for: .milliseconds(150))
+            pane.view = nil
+            editors.reclaimFocusPaneView(slot.index)
+            try await Task.sleep(for: .milliseconds(50))
+        }
     }
 }
