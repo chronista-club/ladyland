@@ -341,6 +341,12 @@ final class LadySynth: AUAudioUnit, @unchecked Sendable {
             let controller = NSHostingController(
                 rootView: ThemedRoot { LadySynthView(synth: self) })
             controller.preferredContentSize = NSSize(width: 440, height: 400)
+            // ⚠️ **SwiftUI にサイズの制約を張らせない**（実測 2026-09-23、スタジオで
+            // トラック切替のたびに落ちた）。既定だと最小・最大サイズが制約になり、
+            // focus pane の frame / bounds 縮小とぶつかって窓のレイアウトが収束しない
+            // （NSGenericException: Update Constraints in Window）。大きさは
+            // preferredContentSize と focus pane の fit が決める
+            controller.sizingOptions = []
             completionHandler(controller)
         }
     }
