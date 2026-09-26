@@ -542,13 +542,53 @@ final class MIDIRouter: @unchecked Sendable {
         drumKnobHandler = handler
     }
 
+    /// LPD8 ノブ → **選択 Track の顔つまみ**（`Lpd8KnobJack.face`）。空なら
+    /// drums 側（従来）。両方に居る CC は顔つまみが先
+    private var lpd8FaceCCs: Set<UInt8> = []
+    private var lpd8FaceHandler: (@Sendable (UInt8, UInt8) -> Void)?
+
+    func setLpd8FaceRouting(ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        lpd8FaceCCs = ccs
+        lpd8FaceHandler = handler
+    }
+
     /// ルーティングトレースの受け口を設定する（起動時に一度）
     func setTraceHandler(_ handler: (@Sendable (MidiRoute) -> Void)?) {
         lock.lock(); defer { lock.unlock() }
         traceHandler = handler
     }
 
-    func routeKeyboard(_ status: UInt8, _ data1: UInt8, _ data2: UInt8) {
+    /// keyboard 経路に届いた MIDI の出どころ。**演奏の帳簿（latch / 和音）は
+    /// 共有**しつつ、Keystage 専用の解釈を汎用鍵盤に当てないための印
+    /// （mako 裁定 2026-09-26「スタジオの MIDI 鍵盤を Keystage の代わりに」）
+    enum KeyboardOrigin: Sendable {
+        /// Keystage（と PC キーボード演奏）— 帯の飲み込み / PC ナビ / 焼きボタン
+        case keystage
+        /// 名前の分からない鍵盤 — 鍵盤 2 と同じ通行証（ノート・AT・ベンド・
+        /// CC64/74、CC1 → ModWheel 席）。それ以外の CC / PC は黙って落とす
+        case generic
+    }
+
+    /// 汎用鍵盤の通行証（純関数 — テスト対象）。鍵盤 2 と同じ列 + CC120
+    /// （All Sound Off = panic。どの鍵盤の EXIT でも止まるべき）
+    static func genericKeyboardForwards(status: UInt8, data1: UInt8) -> Bool {
+        secondKeyboardForwards(status: status, data1: data1)
+            || (status & 0xF0 == 0xB0 && data1 == 120)
+    }
+
+    func routeKeyboard(
+        _ status: UInt8, _ rawData1: UInt8, _ rawData2: UInt8, origin: KeyboardOrigin = .keystage
+    ) {
+        // ⭐ 汎用鍵盤はまず翻訳（CC1 → ModWheel 席。鍵盤 2 と同じアダプタ）、
+        // 通行証の無いものはここで落とす — Keystage 専用の解釈（帯 / PC / 焼き
+        // ボタン / ch16）に届かせない。⚠️ trace も出さない（落とす量が多く、
+        // Debug ログを埋める）
+        let data1 =
+            origin == .generic ? Self.secondKeyboardTranslated(status: status, data1: rawData1) : rawData1
+        if origin == .generic, !Self.genericKeyboardForwards(status: status, data1: data1) {
+            return
+        }
         lock.lock()
         // ダンパーの極性を**入口で**直す（mako 報告 2026-08-14「キープが逆」—
         // ペダルには踏むと閉じる/開くの 2 種があり、逆極性の個体は踏んで
@@ -556,7 +596,7 @@ final class MIDIRouter: @unchecked Sendable {
         // ネイティブ sustain も assign モードの割当も全部同じ向きになる）
         let data2 =
             (status & 0xF0 == 0xB0 && data1 == UInt8(FaceKnobAssignment.damperCC)
-                && pedalInverted) ? 127 - data2 : data2
+                && pedalInverted) ? 127 - rawData2 : rawData2
         let trace = traceHandler
 
         // 🧪 **ボタン類の受信を人が読める形で出す**（mako 要望 2026-08-05
@@ -564,7 +604,7 @@ final class MIDIRouter: @unchecked Sendable {
         // ノート（0x8n/0x9n/0xAn）とノブの値ストリーム（ch15 の CC0-63）は除く
         let isNote = status & 0xF0 == 0x80 || status & 0xF0 == 0x90 || status & 0xF0 == 0xA0
         let isKnobStream = status == 0xBE && data1 < 64
-        if !isNote, !isKnobStream {
+        if !isNote, !isKnobStream, origin == .keystage {
             NSLog("keystage: [受信] %@", Self.describe(status, data1, data2))
         }
 
@@ -926,6 +966,15 @@ final class MIDIRouter: @unchecked Sendable {
             lock.unlock()
             return
         }
+        // LPD8 ノブ CC → 顔つまみ Jack（`Lpd8KnobJack.face`。割当の有無に
+        // 関わらず飲む — ドラム音源へ漏らさない）
+        if status & 0xF0 == 0xB0, lpd8FaceCCs.contains(data1) {
+            let handler = lpd8FaceHandler
+            lock.unlock()
+            trace?(.lpd8FaceKnob(cc: data1, value: data2))
+            handler?(data1, data2)
+            return
+        }
         // LPD8 ノブ CC → ドラム顔つまみ（keyboard 側と同じ割当ベース横取り）
         if status & 0xF0 == 0xB0, drumKnobCCs.contains(data1), let handler = drumKnobHandler {
             lock.unlock()
@@ -940,7 +989,25 @@ final class MIDIRouter: @unchecked Sendable {
     }
 }
 
-/// CoreMIDI クライアント。ソースを名前で識別して 2 経路に接続する
+/// ソースが刺さる経路（接続表の答え。spec/09 Jack の「機材セクション → Jack」）
+enum MIDISourceRoute: Equatable, Sendable {
+    /// Keystage（KBD/CTRL と DAW IN の 2 本）→ keyboard 経路
+    case keystage
+    /// 名前の分からない鍵盤 → keyboard 経路（`KeyboardOrigin.generic`）
+    case genericKeyboard
+    /// LPD8 → drums 経路
+    case drums
+    /// MiniLab / NCXse / （Keystage が居るときの）汎用鍵盤 → 鍵盤 2 経路
+    case secondKeyboard
+}
+
+/// 繋いだソース（Jack 結線図の表示用）
+struct MIDIConnectedSource: Equatable, Sendable {
+    let name: String
+    let route: MIDISourceRoute
+}
+
+/// CoreMIDI クライアント。ソースを名前で識別して 3 経路に接続する
 final class MIDIInput {
     private var client = MIDIClientRef()
     private var keyboardPort = MIDIPortRef()
@@ -952,8 +1019,15 @@ final class MIDIInput {
     /// Keystage のソースに振った番号（refCon で持たせる。Clock の集計に出る）
     private var keystageSourceCount = 0
 
-    /// 接続済みソースの表示名（UI 表示用）
+    /// 接続済みソースの表示名（ログ用。`connected` の文字列版）
     private(set) var connectedSources: [String] = []
+
+    /// 接続済みソース（Jack 結線図用。結線先つき）
+    private(set) var connected: [MIDIConnectedSource] = []
+
+    /// 汎用鍵盤の refCon に立てるビット（Keystage の 1-based 番号と共存。
+    /// keyboard ポートのコールバックが origin を読むのに使う）
+    private static let genericMarker = 0x100
 
     /// セットアップ変更（挿抜）の通知先（メインスレッドで呼ばれる。LedBus の再接続用）
     var onSetupChanged: (() -> Void)?
@@ -986,9 +1060,11 @@ final class MIDIInput {
             // **どのエンドポイントから来たか**を refCon で受ける（接続時に
             // 1-based の番号を渡してある）。渡さないと 2 本の Keystage が
             // 混ざっても区別できず、BPM が 2 倍に読めているのに気づけない
-            let source = Int(bitPattern: srcConnRefCon)
+            let marker = Int(bitPattern: srcConnRefCon)
+            let origin: MIDIRouter.KeyboardOrigin = marker & Self.genericMarker != 0 ? .generic : .keystage
+            let source = marker & ~Self.genericMarker
             Self.handle(
-                eventList, route: { routerRef.routeKeyboard($0, $1, $2) },
+                eventList, route: { routerRef.routeKeyboard($0, $1, $2, origin: origin) },
                 word: { word in
                     // MessageType 1 = System Real Time。status 0xF8 = MIDI Clock。
                     // **ここでしか拾えない** — MT2 のフィルタを通らないため
@@ -1025,19 +1101,68 @@ final class MIDIInput {
         connectSources()
     }
 
+    /// 名前 1 つの結線先（純関数 — テスト対象）。nil = 繋がない。
+    ///
+    /// ⭐ **未知の鍵盤は捨てない**（mako 裁定 2026-09-26「スタジオにある MIDI
+    /// 鍵盤を Keystage の代わりに」）: Keystage 不在ならシンセ入力 1（keyboard
+    /// 経路、汎用の通行証）、居れば鍵盤 2。ROTO（`RotoService` が自前で繋ぐ）と
+    /// 仮想ポート（IAC / Network）は鍵盤ではないので繋がない
+    static func route(forSourceName name: String, hasKeystage: Bool) -> MIDISourceRoute? {
+        if name.contains("Keystage") { return .keystage }
+        if name.contains("LPD8") { return .drums }
+        // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
+        // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
+        // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
+        // 全 25 鍵の健全性は実測済み（2026-08-22 スニファ 2 周 —
+        // 「鍵盤 2 つ壊れてそう」は配線されていなかっただけ）
+        if name.contains("MiniLab") { return .secondKeyboard }
+        if name.contains("NCXse") {
+            // ⚠️ `-controller` は**意図的に繋がない** — スティックとベンドが
+            // ch1/ch2 へ複製されて二重に届くうえ、音量ノブ（CC7）と掃除
+            // バースト（CC121/123）の発生源（実測 2026-08-10）。
+            // 演奏に要るものは全部 `-keyboard` 側に揃っている
+            return name.contains("keyboard") ? .secondKeyboard : nil
+        }
+        let lowered = name.lowercased()
+        if lowered.contains("roto") || lowered.contains("iac") || lowered.contains("network") {
+            return nil
+        }
+        return hasKeystage ? .secondKeyboard : .genericKeyboard
+    }
+
+    /// 名前の一覧 → 結線（Keystage の有無は一覧全体で決める）
+    static func plan(sourceNames: [String]) -> [MIDIConnectedSource] {
+        let hasKeystage = sourceNames.contains { $0.contains("Keystage") }
+        return sourceNames.compactMap { name in
+            route(forSourceName: name, hasKeystage: hasKeystage).map {
+                MIDIConnectedSource(name: name, route: $0)
+            }
+        }
+    }
+
     /// ソースを列挙し、名前で経路に接続する
     private func connectSources() {
         connectedSources = []
+        connected = []
         keystageSourceCount = 0
         // 繋ぎ直したら測り直す — 呼ばないと抜いても最後の BPM が残る
         router.resetClock()
-        for i in 0..<MIDIGetNumberOfSources() {
-            let source = MIDIGetSource(i)
-            let name = Self.displayName(of: source) ?? "(unknown)"
-
-            // Keystage は KBD/CTRL の 2 ポートを持つ。P1 は両方 keyboard 経路
-            // （ノブ CC の顔つまみ割当は P4 で CTRL を分離）
-            if name.contains("Keystage") {
+        let sources = (0..<MIDIGetNumberOfSources()).map { MIDIGetSource($0) }
+        let names = sources.map { Self.displayName(of: $0) ?? "(unknown)" }
+        // ⚠️ **いったん全部抜く** — 汎用鍵盤は Keystage の挿抜で刺し先が
+        // 変わる（鍵盤 1 ⇄ 鍵盤 2）ので、前回の接続が残ると 2 経路に届く。
+        // 未接続のソースを抜いてもエラーが返るだけで害はない
+        for source in sources {
+            for port in [keyboardPort, drumsPort, secondKeyboardPort] {
+                MIDIPortDisconnectSource(port, source)
+            }
+        }
+        let planned = Self.plan(sourceNames: names)
+        for (source, name) in zip(sources, names) {
+            guard let entry = planned.first(where: { $0.name == name }) else { continue }
+            switch entry.route {
+            case .keystage:
+                // Keystage は KBD/CTRL の 2 ポートを持つ。両方 keyboard 経路。
                 // **1-based の番号を refCon で持たせる**（0 は「不明」に使う）。
                 // Clock の集計にこの番号が出るので、下のログと突き合わせれば
                 // どのエンドポイントが送っているか分かる
@@ -1045,25 +1170,22 @@ final class MIDIInput {
                 let marker = UnsafeMutableRawPointer(bitPattern: keystageSourceCount)
                 MIDIPortConnectSource(keyboardPort, source, marker)
                 connectedSources.append("\(name) → keyboard(src#\(keystageSourceCount))")
-            } else if name.contains("LPD8") {
+            case .genericKeyboard:
+                // 汎用鍵盤 = シンセ入力 1（Keystage 不在）。番号は Keystage と
+                // 同じ列で振る（Clock の集計用）、origin は上位ビットで印す
+                keystageSourceCount += 1
+                let marker = UnsafeMutableRawPointer(
+                    bitPattern: keystageSourceCount | Self.genericMarker)
+                MIDIPortConnectSource(keyboardPort, source, marker)
+                connectedSources.append("\(name) → keyboard(汎用 src#\(keystageSourceCount))")
+            case .drums:
                 MIDIPortConnectSource(drumsPort, source, nil)
                 connectedSources.append("\(name) → drums")
-            } else if name.contains("MiniLab") {
-                // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
-                // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
-                // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
-                // 全 25 鍵の健全性は実測済み（2026-08-22 スニファ 2 周 —
-                // 「鍵盤 2 つ壊れてそう」は配線されていなかっただけ）
-                MIDIPortConnectSource(secondKeyboardPort, source, nil)
-                connectedSources.append("\(name) → 鍵盤2")
-            } else if name.contains("NCXse"), name.contains("keyboard") {
-                // ⚠️ `-controller` は**意図的に繋がない** — スティックとベンドが
-                // ch1/ch2 へ複製されて二重に届くうえ、音量ノブ（CC7）と掃除
-                // バースト（CC121/123）の発生源（実測 2026-08-10）。
-                // 演奏に要るものは全部 `-keyboard` 側に揃っている
+            case .secondKeyboard:
                 MIDIPortConnectSource(secondKeyboardPort, source, nil)
                 connectedSources.append("\(name) → 鍵盤2")
             }
+            connected.append(entry)
         }
         NSLog("MIDI sources: %@", connectedSources.isEmpty ? "(none)" : connectedSources.joined(separator: ", "))
     }

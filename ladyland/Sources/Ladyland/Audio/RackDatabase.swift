@@ -191,6 +191,13 @@ final class RackDatabase: @unchecked Sendable {
             }
         }
 
+        // LPD8 ノブ 8 の刺し先（spec/09 Jack — drums / face。mako 裁定 2026-09-26）
+        migrator.registerMigration("v12-lpd8-knob-jack") { db in
+            try db.alter(table: "rackState") { t in
+                t.add(column: "lpd8KnobJack", .text)
+            }
+        }
+
         return migrator
     }
 
@@ -406,6 +413,8 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
     /// 画面のテーマ（`"mint/dark"`）
     var theme: String?
     var tempoSync: Bool?
+    /// LPD8 ノブ 8 の刺し先（`Lpd8KnobJack` の raw 値）
+    var lpd8KnobJack: String?
 
     /// 総数の既定 8 は「trackCount 導入前のファイル」の歴史的事実であって
     /// 設定値ではない（InstrumentRack.restore と同じ読み替え）
@@ -426,6 +435,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         rotoColors = snapshot.rotoColors
         theme = snapshot.theme
         tempoSync = snapshot.tempoSync
+        lpd8KnobJack = snapshot.lpd8KnobJack
     }
 
     func snapshot(slots: [SlotSnapshot]) -> RackSnapshot {
@@ -443,6 +453,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         snapshot.rotoColors = rotoColors
         snapshot.theme = theme
         snapshot.tempoSync = tempoSync
+        snapshot.lpd8KnobJack = lpd8KnobJack
         return snapshot
     }
 }

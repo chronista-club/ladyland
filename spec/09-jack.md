@@ -33,8 +33,9 @@ Jack は 2 つの面を持つ:
 
 | Jack | 要求する能力 | 束縛 | 現状の実体(読み替え) |
 |---|---|---|---|
-| **シンセ入力 1** | 鍵盤(Note + vel) | 担当 Track(nil=追従) | keyboard 経路(Keystage / PC-KB) |
-| **シンセ入力 2** | 鍵盤 | 担当 Track(nil=追従) | secondKeyboard 経路(MiniLab / NCXse) |
+| **シンセ入力 1** | 鍵盤(Note + vel) | 担当 Track(nil=追従) | keyboard 経路(Keystage / PC-KB / **Keystage 不在時の汎用鍵盤**) |
+| **シンセ入力 2** | 鍵盤 | 担当 Track(nil=追従) | secondKeyboard 経路(MiniLab / NCXse / **Keystage 在席時の汎用鍵盤**) |
+| **顔つまみ** | 連続値ノブ × 8 | 選択 Track(現ページの席 8) | Keystage のノブ帯 / **LPD8 ノブ 8(`Lpd8KnobJack.face`)** / ROTO SMART |
 | **サンプラ打面** | パッド(Note + vel) | drums 固定 | drums 経路(LPD8) |
 | MIXER(v2) | 連続値ノブ × N | 全 Track の gain | ROTO MIXER 冊(焼き)/ MiniLab ノブ 16(未配線) |
 | ナビ/選択(整理のみ) | 相対エンコーダー/ボタン | カーソル | VALUE エンコーダー / RK / REW-FF |
@@ -46,3 +47,10 @@ Jack は 2 つの面を持つ:
 - **v1 の刺し替えは設営時のみ**(曲中の動的刺し替えは将来)
 - 移行は**漸進**: 既存経路(keyboard/secondKeyboard/drums)は Jack の実体として
   そのまま生きる。接続表のデータ化(パッチベイ)は v2 以降
+- **未知の鍵盤は捨てない**(mako 裁定 2026-09-26「スタジオにある MIDI 鍵盤を
+  Keystage の代わりに」— 鍵盤の持ち運びが大変。PC + 小さな機材で動けるように):
+  名前の分からない source は Keystage 不在ならシンセ入力 1、居ればシンセ入力 2 に
+  **自動で刺さる**(設定なし)。ROTO / IAC / Network は鍵盤ではないので繋がない
+- **LPD8 のノブ 8 は Jack で刺し替える**(drums / 顔つまみ。同日裁定)。顔つまみの
+  ときは位置 i → 現ページ(`activeKnobPage ?? rotoPage`)の席 i。ページを LPD8 の
+  PROG 番号で分ける案は不採用 — PROG はパッド用のまま、ページは ROTO / GUI に追従

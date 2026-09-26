@@ -93,6 +93,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// **LPD8 ノブ 8 の刺し先**（spec/09 Jack。mako 裁定 2026-09-26「Keystage の
+    /// つまみで出来ていたことを LPD8 で代用したい」）。drums = ドラム席の顔つまみ
+    /// （従来）、face = 選択 Track の顔つまみ（位置 → 現ページの席）
+    @Published var lpd8KnobJack: Lpd8KnobJack = .drums {
+        didSet {
+            guard lpd8KnobJack != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()  // [常時保存 26] LPD8 ノブの刺し先
+        }
+    }
+
     /// 鍵盤 2（NCXse / MiniLab）= シンセ入力 2 の担当スロット（**nil = 選択に
     /// 追従**。指定 = その席に固定。2nd キーボード計画 ②、mako 裁定 2026-08-10
     /// 「別々の二つの音源同時に弾きたい」）。タイルの右クリックで固定する
@@ -264,6 +275,9 @@ final class AppState: ObservableObject {
     /// いま繋がっている MIDI ソース（Jack 結線図の接続表示用。
     /// `connectSources` の記録をそのまま映す — 挿抜で更新）
     @Published private(set) var midiConnectedSources: [String] = []
+
+    /// 同じものを結線先つきで（Jack 結線図の行 — 汎用鍵盤は名前で行になる）
+    @Published private(set) var midiConnected: [MIDIConnectedSource] = []
 
     @Published private(set) var latchEngaged = false
     @Published private(set) var latchSustaining = 0
@@ -687,6 +701,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -963,8 +978,10 @@ final class AppState: ObservableObject {
             self?.keystage.reconnect()
             // Jack 結線図の接続表示（挿抜で線の色が変わる）
             self?.midiConnectedSources = self?.midi?.connectedSources ?? []
+            self?.midiConnected = self?.midi?.connected ?? []
         }
         midiConnectedSources = midi?.connectedSources ?? []
+        midiConnected = midi?.connected ?? []
         ledBus.start()
         pushBaseColors()
     }
@@ -1097,6 +1114,8 @@ final class AppState: ObservableObject {
             secondKeyboardSlot = snapshot.secondKeyboardSlot
             // シンセ入力 1 の固定（同上）
             synthInput1Slot = snapshot.synthInput1Slot
+            // LPD8 ノブの刺し先（nil = drums = 導入前の挙動）
+            lpd8KnobJack = snapshot.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) ?? .drums
             restoreTask?.cancel()
             restoreTask = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1566,6 +1585,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -1610,6 +1630,9 @@ final class AppState: ObservableObject {
                 }
                 if let synth = partial.synthInput1Slot { synthInput1Slot = synth }
                 if let second = partial.secondKeyboardSlot { secondKeyboardSlot = second }
+                if let jack = partial.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) {
+                    lpd8KnobJack = jack
+                }
                 if let keystage = partial.keystage,
                    let decoded = try? JSONDecoder().decode(
                        KeystageSettings.self, from: Data(keystage.utf8)) {
@@ -1806,6 +1829,21 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 drumController.handle(knob: Int(cc), value127: Int(value))
                 self?.scheduleAutosave()  // [常時保存 18] LPD8 顔つまみ
+            }
+        }
+        // LPD8 ノブ → **選択 Track の顔つまみ**（`Lpd8KnobJack.face`。Keystage の
+        // ノブ帯の代役 — 位置 i → 現ページの席 i、席は `faceKnobs` と共有なので
+        // ピックアップも同じ帳簿）。drums なら空集合 = 上の従来経路だけが効く
+        let faceCCs = lpd8KnobJack == .face ? Lpd8FaceKnobs.interceptedCCs(current: lpd8KnobCCs) : []
+        let currentKnobCCs = lpd8KnobCCs
+        router.setLpd8FaceRouting(ccs: faceCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let page = self.activeKnobPage ?? self.rotoPage
+                guard let seat = Lpd8FaceKnobs.seat(forCC: cc, current: currentKnobCCs, page: page)
+                else { return }
+                controller.handle(knob: seat, value127: Int(value))
+                self.scheduleAutosave()  // [常時保存 27] LPD8 → 顔つまみ
             }
         }
 

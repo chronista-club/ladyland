@@ -3,10 +3,11 @@
 //! NodeGraph の「ケーブルが見える」楽しさだけを頂き、座標管理は持たない
 //! （両端が固定リストなので線は自動で決まる）。
 //!
-//! v1 は接続がコード固定（`connectSources` の分岐と対）なので**図は読み取り**。
-//! 操作できるのは Jack 側の束縛（担当 Track）だけ。刺し替えは接続表の
-//! データ化（design/08 §4 v3）で効く。演奏前チェックが主用途 —
-//! 「いま誰がどこ？」が一目で分かること。
+//! 接続は `MIDIInput.plan`（名前 → 経路）の写し。**未知の鍵盤は名前で行になる**
+//! （Keystage 不在なら鍵盤 1、居れば鍵盤 2 — mako 裁定 2026-09-26「スタジオの
+//! MIDI 鍵盤を Keystage の代わりに」）。操作できるのは Jack 側の束縛（担当
+//! Track）と **LPD8 ノブ 8 の刺し先**（ドラム / 顔つまみ）。演奏前チェックが
+//! 主用途 — 「いま誰がどこ？」が一目で分かること。
 
 import CreoUI
 import SwiftUI
@@ -35,28 +36,56 @@ struct JackBoardView: View {
         name.isEmpty ? "T\(index + 1)" : "T\(index + 1)  \(name)"
     }
 
-    // MARK: - 行モデル（v1 固定 — connectSources の分岐と対）
+    // MARK: - 行モデル（`MIDIInput.plan` の結線と対。機材は**セクション単位**）
 
     enum JackID: String, CaseIterable {
-        case synth1, synth2, drums
+        case synth1, synth2, faceKnobs, drums
     }
 
-    struct GearRow: Identifiable {
+    struct GearRow: Identifiable, Equatable {
         let id: String
         let gear: String
         let section: String
         let jack: JackID
-        /// midiConnectedSources に現れる名前の断片（nil = 常時接続扱い）
-        let matchKey: String?
+        let connected: Bool
     }
 
-    private static let gearRows: [GearRow] = [
-        GearRow(id: "keystage", gear: "Keystage", section: "鍵盤 + ノブ8", jack: .synth1, matchKey: "Keystage"),
-        GearRow(id: "pckb", gear: "PC キーボード", section: "Tab 演奏モード", jack: .synth1, matchKey: nil),
-        GearRow(id: "minilab", gear: "MiniLab mkII", section: "鍵盤", jack: .synth2, matchKey: "MiniLab"),
-        GearRow(id: "ncxse", gear: "NCXse", section: "鍵盤", jack: .synth2, matchKey: "NCXse"),
-        GearRow(id: "lpd8", gear: "LPD8", section: "パッド + ノブ8", jack: .drums, matchKey: "LPD8"),
-    ]
+    /// 行を組む（純関数 — テスト対象）。汎用鍵盤は名前で行になり、結線先は
+    /// 接続表どおり（Keystage 不在なら鍵盤 1、居れば鍵盤 2）。
+    /// LPD8 のノブ 8 は `lpd8KnobJack` で刺し先が変わる
+    static func gearRows(sources: [MIDIConnectedSource], lpd8KnobJack: Lpd8KnobJack) -> [GearRow] {
+        let has: (MIDISourceRoute) -> Bool = { route in sources.contains { $0.route == route } }
+        let keystage = has(.keystage)
+        let lpd8 = has(.drums)
+        var rows: [GearRow] = [
+            GearRow(id: "keystage.keys", gear: "Keystage", section: "鍵盤", jack: .synth1, connected: keystage),
+            GearRow(id: "keystage.knobs", gear: "Keystage", section: "ノブ 8", jack: .faceKnobs, connected: keystage),
+            GearRow(id: "pckb", gear: "PC キーボード", section: "Tab 演奏モード", jack: .synth1, connected: true),
+        ]
+        // 汎用鍵盤（挿さっているものだけ。抜けば行ごと消える）
+        // id は名前ではなく通し番号 — 同じ名前で 2 ポート持つ鍵盤が居ても行が衝突しない
+        for (i, source) in sources.enumerated() where source.route == .genericKeyboard {
+            rows.append(GearRow(id: "generic.\(i)", gear: source.name, section: "鍵盤（汎用）", jack: .synth1, connected: true))
+        }
+        let minilab = sources.contains { $0.route == .secondKeyboard && $0.name.contains("MiniLab") }
+        let ncxse = sources.contains { $0.route == .secondKeyboard && $0.name.contains("NCXse") }
+        rows.append(GearRow(id: "minilab", gear: "MiniLab mkII", section: "鍵盤", jack: .synth2, connected: minilab))
+        rows.append(GearRow(id: "ncxse", gear: "NCXse", section: "鍵盤", jack: .synth2, connected: ncxse))
+        for (i, source) in sources.enumerated()
+        where source.route == .secondKeyboard && !source.name.contains("MiniLab") && !source.name.contains("NCXse") {
+            rows.append(GearRow(id: "generic.\(i)", gear: source.name, section: "鍵盤（汎用）", jack: .synth2, connected: true))
+        }
+        rows.append(GearRow(id: "lpd8.pads", gear: "LPD8", section: "パッド", jack: .drums, connected: lpd8))
+        rows.append(
+            GearRow(
+                id: "lpd8.knobs", gear: "LPD8", section: "ノブ 8",
+                jack: lpd8KnobJack == .face ? .faceKnobs : .drums, connected: lpd8))
+        return rows
+    }
+
+    private var rows: [GearRow] {
+        Self.gearRows(sources: appState.midiConnected, lpd8KnobJack: appState.lpd8KnobJack)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -70,7 +99,7 @@ struct JackBoardView: View {
                 HStack(alignment: .top, spacing: 0) {
                     // 左列 — 機材セクション
                     VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
-                        ForEach(Self.gearRows) { row in
+                        ForEach(rows) { row in
                             gearCard(row)
                                 .anchorPreference(
                                     key: JackAnchorKey.self, value: .trailing
@@ -101,12 +130,12 @@ struct JackBoardView: View {
             // ケーブル — 両端のアンカーを集めて描く
             .backgroundPreferenceValue(JackAnchorKey.self) { anchors in
                 GeometryReader { proxy in
-                    ForEach(Self.gearRows) { row in
+                    ForEach(rows) { row in
                         if let from = anchors["gear.\(row.id)"],
                             let to = anchors["jack.\(row.jack.rawValue)"] {
                             cable(
                                 from: proxy[from], to: proxy[to],
-                                lit: isConnected(row))
+                                lit: row.connected)
                         }
                     }
                 }
@@ -116,13 +145,8 @@ struct JackBoardView: View {
 
     // MARK: - 部品
 
-    private func isConnected(_ row: GearRow) -> Bool {
-        guard let key = row.matchKey else { return true }
-        return appState.midiConnectedSources.contains { $0.contains(key) }
-    }
-
     private func gearCard(_ row: GearRow) -> some View {
-        let connected = isConnected(row)
+        let connected = row.connected
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: CreoUITokens.spacingS) {
                 Circle()
@@ -134,6 +158,23 @@ struct JackBoardView: View {
             Text(row.section)
                 .font(LadylandFont.deskCaption)
                 .foregroundColor(theme.textSecondary)
+            // LPD8 のノブ 8 だけ刺し替えられる（Keystage のつまみの代役。
+            // mako 裁定 2026-09-26）。ページは ROTO / Keystage の現ページに追従
+            if row.id == "lpd8.knobs" {
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { appState.lpd8KnobJack },
+                        set: { appState.lpd8KnobJack = $0 })
+                ) {
+                    Text("ドラム").tag(Lpd8KnobJack.drums)
+                    Text("顔つまみ").tag(Lpd8KnobJack.face)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
         }
         .padding(CreoUITokens.spacingS)
         .frame(width: 150, alignment: .leading)
@@ -160,6 +201,22 @@ struct JackBoardView: View {
             bindableJackCard(
                 title: "鍵盤 2", slot: appState.secondKeyboardSlot, layout: layout,
                 fix: { appState.secondKeyboardSlot = $0 })
+        case .faceKnobs:
+            VStack(alignment: .leading, spacing: 2) {
+                Text("顔つまみ")
+                    .font(LadylandFont.deskHeading)
+                Text("担当: 選択中の Track（P\((appState.activeKnobPage ?? appState.rotoPage) + 1)）")
+                    .font(LadylandFont.deskCaption)
+                    .foregroundColor(theme.textSecondary)
+            }
+            .padding(CreoUITokens.spacingS)
+            .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
+                    .fill(theme.surfaceSurface))
+            .overlay(
+                RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
+                    .stroke(theme.surfaceBorderSubtle, lineWidth: 1))
         case .drums:
             VStack(alignment: .leading, spacing: 2) {
                 Text("サンプラ打面")
@@ -222,6 +279,12 @@ struct JackBoardView: View {
             trackPicker(slot: appState.synthInput1Slot) { appState.synthInput1Slot = $0 }
         case .synth2:
             trackPicker(slot: appState.secondKeyboardSlot) { appState.secondKeyboardSlot = $0 }
+        case .faceKnobs:
+            Text("選択中の Track")
+                .font(LadylandFont.deskCaption)
+                .foregroundColor(theme.textTertiary)
+                .padding(CreoUITokens.spacingS)
+                .frame(width: 260, alignment: .leading)
         case .drums:
             Text("ドラム席")
                 .font(LadylandFont.deskCaption)

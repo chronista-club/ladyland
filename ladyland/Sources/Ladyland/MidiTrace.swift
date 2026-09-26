@@ -12,6 +12,8 @@ enum MidiRoute: Sendable, Equatable {
     case knob(cc: UInt8, value: UInt8)
     /// LPD8 ノブ → ドラムスロットの顔つまみ
     case drumKnob(cc: UInt8, value: UInt8)
+    /// LPD8 ノブ → 選択 Track の顔つまみ（`Lpd8KnobJack.face`。位置 → 現ページの席）
+    case lpd8FaceKnob(cc: UInt8, value: UInt8)
     /// LPD8 の PROG 4 パッド → プラグイン選択（音は出さない）
     case padSelect(pad: Int)
     /// Keystage の Rec / Loop（`KeystageControls.pageStep`）→ ROTO のページ送り
@@ -72,6 +74,8 @@ enum MidiTraceFormat {
             return ("knob-\(cc)", "Keystage ノブ (CC\(cc)) = \(value) → 顔つまみ")
         case .drumKnob(let cc, let value):
             return ("drumknob-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → ドラム顔つまみ")
+        case .lpd8FaceKnob(let cc, let value):
+            return ("lpd8face-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → 顔つまみ \(selectedSlot)")
         case .allSoundOff:
             // 押すたびに残す（畳まない）— 音が止まった理由は履歴で追えないと困る
             return (nil, "CC120 All Sound Off → パニック（全消音）")
