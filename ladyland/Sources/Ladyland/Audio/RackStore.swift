@@ -130,6 +130,10 @@ struct RackSnapshot: Codable {
     /// シンセ入力 1（Keystage）の担当スロット（spec/09 Jack。nil = 選択追従）
     var synthInput1Slot: Int?
 
+    /// LPD8 ノブ 8 の刺し先（`Lpd8KnobJack` の raw 値。nil = drums = 従来。
+    /// mako 裁定 2026-09-26「Keystage のつまみの役は LPD8 で」）
+    var lpd8KnobJack: String?
+
     /// Keystage の ARP / CHORD 設定（JSON。mako 裁定 2026-08-04「ラック全体で
     /// 1 セット」）。nil = 未保存 = 起動時に実機から読んだ値をそのまま使う
     var keystage: String?

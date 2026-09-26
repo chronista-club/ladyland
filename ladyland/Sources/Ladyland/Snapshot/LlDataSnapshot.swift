@@ -45,6 +45,7 @@ struct LlDataSnapshot {
         var keystage: String? = nil
         var rotoColors: String? = nil
         var tempoSync: Bool? = nil
+        var lpd8KnobJack: String? = nil
     }
 
     var globals = Globals()
@@ -110,6 +111,9 @@ struct LlDataSnapshot {
         }
         if let value = snapshot.rotoColors {
             rack.children.append(KDLNode(name: "rotoColors", props: ["json": .string(value)]))
+        }
+        if let value = snapshot.lpd8KnobJack {
+            rack.children.append(KDLNode(name: "lpd8Knobs", props: ["jack": .string(value)]))
         }
         if let value = snapshot.tempoSync {
             rack.children.append(KDLNode(name: "tempoSync", props: ["enabled": .bool(value)]))
@@ -301,7 +305,8 @@ struct LlDataSnapshot {
                 secondKeyboardSlot: rack.child(named: "secondKeyboard")?["slot"]?.intValue,
                 keystage: rack.child(named: "keystage")?["json"]?.stringValue,
                 rotoColors: rack.child(named: "rotoColors")?["json"]?.stringValue,
-                tempoSync: rack.child(named: "tempoSync")?["enabled"]?.boolValue)
+                tempoSync: rack.child(named: "tempoSync")?["enabled"]?.boolValue,
+                lpd8KnobJack: rack.child(named: "lpd8Knobs")?["jack"]?.stringValue)
             if let stamp = rack["exportedAt"]?.stringValue,
                let date = timestampFormatter.date(from: stamp)
             {
@@ -392,6 +397,7 @@ struct LlDataSnapshot {
             snapshot.keystage = globals.keystage
             snapshot.rotoColors = globals.rotoColors
             snapshot.tempoSync = globals.tempoSync
+            snapshot.lpd8KnobJack = globals.lpd8KnobJack
         }
         return snapshot
     }
