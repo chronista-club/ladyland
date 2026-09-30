@@ -20,7 +20,8 @@ struct PaneWindowModelTests {
         #expect(PaneID.keystage.rawValue == "keystage")
         #expect(PaneID.lpd8.rawValue == "lpd8")
         #expect(PaneID.roto.rawValue == "roto")
-        #expect(PaneID.allCases.count == 4)
+        #expect(PaneID.mixer.rawValue == "mixer")
+        #expect(PaneID.allCases.count == 5)
     }
 
     @Test("面 → サイドバーの SurfaceTab が 1:1（Track は切り離せない）")
