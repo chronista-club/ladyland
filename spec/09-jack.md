@@ -50,7 +50,10 @@ Jack は 2 つの面を持つ:
 - **未知の鍵盤は捨てない**(mako 裁定 2026-09-26「スタジオにある MIDI 鍵盤を
   Keystage の代わりに」— 鍵盤の持ち運びが大変。PC + 小さな機材で動けるように):
   名前の分からない source は Keystage 不在ならシンセ入力 1、居ればシンセ入力 2 に
-  **自動で刺さる**(設定なし)。ROTO / IAC / Network は鍵盤ではないので繋がない
+  **自動で刺さる**(設定なし)。ROTO / IAC / Network は鍵盤ではないので繋がない。
+  ⭐ **DIN しか無い鍵盤は Zenith 2 の MIDI IN 経由で入る**(source 名は
+  「Zenith 2」— mako 2026-10-01「MIDI IN/OUT が 1 ポートセットである」)。
+  名前不明扱いなので USB 鍵盤と同じ道で刺さる。何も挿していなければ黙っているだけ
 - **LPD8 のノブ 8 は Jack で刺し替える**(drums / 顔つまみ。同日裁定)。顔つまみの
   ときは位置 i → 現ページ(`activeKnobPage ?? rotoPage`)の席 i。ページを LPD8 の
   PROG 番号で分ける案は不採用 — PROG はパッド用のまま、ページは ROTO / GUI に追従
