@@ -41,6 +41,11 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1c. **机 = 2.5D の Jack(2026-10-01、mako 赤入れ)**: Jack 面の広い版に、結線図の
+    下として机を置く。`Desk.swift`(配置モデル、0-1 の机座標、window.json の
+    `desk`)+ `DeskView`(`rotation3DEffect` の板に既存部品を乗せる)。操作は
+    実機と同じ入口(`routeKeyboard` / `routeDrums`)。RealityKit への置き換えは
+    配置モデルを残したまま描画だけ差し替える前提
 1b. **汎用鍵盤 + LPD8 顔つまみ(2026-09-26)**: 接続表を純関数に切り出し、未知の
     鍵盤を自動で刺す。LPD8 ノブ 8 を「顔つまみ」Jack に刺し替えられる(Jack 面の
     LPD8 ノブ行の切替)。Jack 面の行は機材のセクション単位(Keystage 鍵盤 / ノブ 8、
