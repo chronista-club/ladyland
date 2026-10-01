@@ -123,8 +123,13 @@ struct JackBoardView: View {
                     }
                     if layout == .wide { Spacer(minLength: 0) }
                 }
-                // MIXER Jack（MiniLab ノブ16 / ROTO）と配役シーンは次段
-                // （design/08 §4）— 効かない設定は並べない・説明文も出さない
+                // 机（2.5D の Jack。mako 赤入れ 2026-10-01）— 広い版だけ。
+                // 結線図の下に、同じ機材を机の上に置いて**その上で弾く・刺し替える**
+                if layout == .wide {
+                    DeskView()
+                        .frame(height: 420)
+                        .clipped()
+                }
             }
             .padding(CreoUITokens.spacingM)
             // ケーブル — 両端のアンカーを集めて描く

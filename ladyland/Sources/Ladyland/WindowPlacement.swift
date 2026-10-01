@@ -102,6 +102,10 @@ struct WindowPreferences: Codable, Equatable {
     /// optional なので導入前の window.json もそのまま読める（2026-09-12）
     var panes: [String: PanePlacement]?
 
+    /// 机の上の機材の置き場（`DeskGear.rawValue` → 0-1 の机座標。2026-10-01）。
+    /// マシン固有 = 会場ごとの配置。無ければ既定の並び（奥 Mixer / 中 LPD8 / 手前 鍵盤）
+    var desk: [String: DeskPlacement]?
+
     static let `default` = WindowPreferences(mode: .fullscreen, frame: nil, screenUUID: nil)
 }
 
@@ -139,7 +143,8 @@ enum PaneID: String, Codable, CaseIterable {
     /// 初回に開くときの寸法（Jack は 3 列の結線図が収まる幅）
     var defaultSize: CGSize {
         switch self {
-        case .jack: return CGSize(width: 960, height: 560)
+        // Jack は結線図 + 机（2.5D）が縦に並ぶ
+        case .jack: return CGSize(width: 960, height: 900)
         case .keystage, .lpd8, .roto: return CGSize(width: 720, height: 640)
         // 8 本のストリップ（64pt + 間隔）が横に収まる幅
         case .mixer: return CGSize(width: 640, height: 360)
@@ -578,6 +583,21 @@ final class WindowPlacementController: ObservableObject {
         guard panes[pane.rawValue] != placement else { return }
         panes[pane.rawValue] = placement
         prefs.panes = panes
+        scheduleSave()
+    }
+
+    // MARK: - 机（2.5D の Jack）
+
+    var deskPlacements: [String: DeskPlacement]? { prefs.desk }
+
+    /// 機材を置き直す（ドラッグを**離したとき**だけ呼ぶ — sidebar 幅と同じ作法）
+    func setDeskPlacement(_ gear: DeskGear, _ placement: DeskPlacement) {
+        var desk = prefs.desk ?? [:]
+        let clamped = DeskModel.clamp(placement)
+        guard desk[gear.rawValue] != clamped else { return }
+        objectWillChange.send()
+        desk[gear.rawValue] = clamped
+        prefs.desk = desk
         scheduleSave()
     }
 
