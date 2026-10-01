@@ -1,4 +1,5 @@
-//! 机の描画 — 2.5D（SwiftUI の `rotation3DEffect` で板を傾ける）。
+//! 机の描画 — 2.5D（床を遠近で描き、機材は奥ほど小さく。板は傾けない —
+//! `DeskModel.scale` のコメント参照）。
 //! モデルは `Desk.swift`。機材は**いまある部品**をそのまま板に乗せる:
 //! Mixer は `MixerView`、LPD8 はパッド 8 + ノブ 8、鍵盤は 2 オクターブ。
 //! 操作はすべて**実機と同じ入口**（`MIDIRouter.routeKeyboard` / `routeDrums`）を
@@ -16,25 +17,22 @@ struct DeskView: View {
     /// ドラッグ中の仮の位置（離したら window.json へ）
     @State private var dragging: [DeskGear: DeskPlacement] = [:]
 
-    static let tilt: Double = 48
-    static let planeHeight: CGFloat = 520
-
     var body: some View {
         GeometryReader { geo in
-            let size = CGSize(width: geo.size.width, height: Self.planeHeight)
+            // 置ける範囲は上下に余白（機材の半分が床からはみ出さないように）
+            let size = CGSize(width: geo.size.width, height: geo.size.height - 120)
             ZStack(alignment: .topLeading) {
                 DeskGround()
                 ForEach(DeskModel.gears(sources: appState.midiConnected)) { gear in
                     let placement =
                         dragging[gear]
                         ?? DeskModel.placement(gear, saved: appState.windowPlacement.deskPlacements)
+                    let point = DeskModel.point(placement, in: size)
                     gearCard(gear, size: size)
-                        .position(DeskModel.point(placement, in: size))
+                        .scaleEffect(DeskModel.scale(depth: placement.depth))
+                        .position(x: point.x, y: point.y + 60)
                 }
             }
-            .frame(width: size.width, height: size.height)
-            .rotation3DEffect(
-                .degrees(Self.tilt), axis: (x: 1, y: 0, z: 0), anchor: .center, perspective: 0.55)
             .frame(width: geo.size.width, height: geo.size.height)
         }
     }
@@ -149,31 +147,42 @@ struct DeskView: View {
     }
 }
 
-/// 机の面 — 奥へ向かう格子
+/// 机の面 — 遠近の格子（奥が狭く、横線は奥ほど詰まる）。描くだけで触れない
 private struct DeskGround: View {
     @Environment(\.creoTheme) private var theme
 
     var body: some View {
         Canvas { context, size in
-            let line = theme.surfaceBorderSubtle.opacity(0.7)
-            var path = Path()
-            let step: CGFloat = 48
-            var x: CGFloat = 0
-            while x <= size.width {
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                x += step
+            let back = DeskModel.scale(depth: 0)
+            let cx = size.width / 2
+            // 床の台形
+            var floor = Path()
+            floor.move(to: CGPoint(x: cx - cx * back, y: 0))
+            floor.addLine(to: CGPoint(x: cx + cx * back, y: 0))
+            floor.addLine(to: CGPoint(x: size.width, y: size.height))
+            floor.addLine(to: CGPoint(x: 0, y: size.height))
+            floor.closeSubpath()
+            context.fill(floor, with: .color(theme.surfaceBgSubtle))
+
+            var grid = Path()
+            let columns = 16
+            for i in 0...columns {
+                let t = CGFloat(i) / CGFloat(columns) - 0.5
+                grid.move(to: CGPoint(x: cx + t * size.width * back, y: 0))
+                grid.addLine(to: CGPoint(x: cx + t * size.width, y: size.height))
             }
-            var y: CGFloat = 0
-            while y <= size.height {
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: size.width, y: y))
-                y += step
+            let rows = 10
+            for i in 0...rows {
+                // 奥ほど詰まる（depth^1.6）
+                let depth = pow(CGFloat(i) / CGFloat(rows), 1.6)
+                let s = DeskModel.scale(depth: Double(depth))
+                let y = size.height * depth
+                grid.move(to: CGPoint(x: cx - cx * s, y: y))
+                grid.addLine(to: CGPoint(x: cx + cx * s, y: y))
             }
-            context.stroke(path, with: .color(line), lineWidth: 0.5)
+            context.stroke(grid, with: .color(theme.surfaceBorderSubtle.opacity(0.7)), lineWidth: 0.5)
         }
-        .background(theme.surfaceBgSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: CreoUITokens.radiusM))
+        .allowsHitTesting(false)
     }
 }
 

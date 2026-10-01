@@ -63,19 +63,33 @@ enum DeskModel {
             depth: min(max(placement.depth, 0), 1))
     }
 
-    /// 机座標 → 板の上の点
-    static func point(_ placement: DeskPlacement, in size: CGSize) -> CGPoint {
-        CGPoint(x: size.width * placement.x, y: size.height * placement.depth)
+    /// 奥行きによる縮尺（奥 0.55 → 手前 1.0）。
+    ///
+    /// ⚠️ **板そのものは傾けない**。`rotation3DEffect` の遠近は見た目だけ傾いて
+    /// 当たり判定が元の位置に残る（実機 2026-10-01 mako「GUI に変化はないね」）。
+    /// 遠近は床の格子と機材の縮尺で出し、機材は軸に沿ったまま置く —
+    /// 押せる場所と見える場所が必ず一致する
+    static func scale(depth: Double) -> Double {
+        0.55 + 0.45 * min(max(depth, 0), 1)
     }
 
-    /// ドラッグの移動量を机座標に戻す
+    /// 机座標 → 画面の点。x は中央から縮尺ぶん寄る（奥ほど中央に集まる）
+    static func point(_ placement: DeskPlacement, in size: CGSize) -> CGPoint {
+        let scale = scale(depth: placement.depth)
+        return CGPoint(
+            x: size.width / 2 + (placement.x - 0.5) * size.width * scale,
+            y: size.height * placement.depth)
+    }
+
+    /// ドラッグの移動量を机座標に戻す（x は縮尺で割る — 奥では同じ指の量で遠くへ）
     static func moved(_ placement: DeskPlacement, by translation: CGSize, in size: CGSize)
         -> DeskPlacement
     {
         guard size.width > 0, size.height > 0 else { return placement }
+        let scale = scale(depth: placement.depth)
         return clamp(
             DeskPlacement(
-                x: placement.x + Double(translation.width / size.width),
+                x: placement.x + Double(translation.width) / (size.width * scale),
                 depth: placement.depth + Double(translation.height / size.height)))
     }
 

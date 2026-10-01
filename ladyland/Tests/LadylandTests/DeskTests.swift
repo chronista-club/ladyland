@@ -46,18 +46,26 @@ struct DeskModelTests {
         #expect(DeskModel.clamp(DeskPlacement(x: 0.3, depth: 0.4)) == DeskPlacement(x: 0.3, depth: 0.4))
     }
 
-    @Test("机座標 → 画面の点（x は幅、depth は奥から手前へ）")
+    @Test("机座標 → 画面の点 — 手前は幅いっぱい、奥は中央に寄る")
     func point() {
-        let p = DeskModel.point(DeskPlacement(x: 0.25, depth: 0.5), in: CGSize(width: 800, height: 400))
-        #expect(p == CGPoint(x: 200, y: 200))
+        let size = CGSize(width: 800, height: 400)
+        #expect(DeskModel.point(DeskPlacement(x: 0.25, depth: 1), in: size) == CGPoint(x: 200, y: 400))
+        #expect(DeskModel.point(DeskPlacement(x: 0.5, depth: 0), in: size) == CGPoint(x: 400, y: 0), "中央は動かない")
+        let back = DeskModel.point(DeskPlacement(x: 0.25, depth: 0), in: size)
+        #expect(back.x > 200 && back.x < 400, "奥では中央寄り")
+        #expect(DeskModel.scale(depth: 1) == 1)
+        #expect(DeskModel.scale(depth: 0) < DeskModel.scale(depth: 1))
     }
 
-    @Test("ドラッグの移動量 → 配置（画面サイズで割る）")
+    @Test("ドラッグの移動量 → 配置（手前は画面サイズで割る、奥は縮尺ぶん遠くへ）")
     func moved() {
-        let moved = DeskModel.moved(
-            DeskPlacement(x: 0.5, depth: 0.5), by: CGSize(width: 80, height: -40),
-            in: CGSize(width: 800, height: 400))
-        #expect(moved == DeskPlacement(x: 0.6, depth: 0.4))
+        let size = CGSize(width: 800, height: 400)
+        let front = DeskModel.moved(DeskPlacement(x: 0.5, depth: 1), by: CGSize(width: 80, height: 0), in: size)
+        #expect(front == DeskPlacement(x: 0.6, depth: 1))
+        let back = DeskModel.moved(DeskPlacement(x: 0.5, depth: 0), by: CGSize(width: 80, height: 0), in: size)
+        #expect(back.x > 0.6, "奥では同じ指の量で遠くへ")
+        let down = DeskModel.moved(DeskPlacement(x: 0.5, depth: 0.5), by: CGSize(width: 0, height: -40), in: size)
+        #expect(down == DeskPlacement(x: 0.5, depth: 0.4))
     }
 
     @Test("保存した配置があればそれ、無ければ既定")
