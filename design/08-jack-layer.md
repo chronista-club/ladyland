@@ -33,12 +33,29 @@ engine 層  64 スロット / drums / master
 | keyboardPort / keyboardTarget | シンセ入力 1 の実体 |
 | secondKeyboardPort / secondKeyboardTarget | シンセ入力 2 の実体 |
 | drumsPort / drumsTarget | サンプラ打面の実体 |
-| `connectSources()` の名前分岐 | 接続表(v1 はハードコードのまま) |
+| `MIDIInput.route(forSourceName:hasKeystage:)` / `plan(sourceNames:)` | 接続表(純関数。未知の名前 → 汎用鍵盤) |
+| `MIDIRouter.KeyboardOrigin`(keystage / generic) | keyboard 経路の**出どころの印** — 帳簿(latch / 和音)は共有、Keystage 専用の解釈(帯の飲み込み / PC ナビ / 焼きボタン / ch16)は keystage だけ。generic は鍵盤 2 と同じ通行証 + CC120 |
+| `Lpd8KnobJack`(drums / face)+ `Lpd8FaceKnobs` | LPD8 ノブ 8 の刺し先。face は 4 プログラム分の CC を全部飲み、位置 → 現ページの席 → `faceKnobs`。snapshot `lpd8Knobs jack=` / DB `lpd8KnobJack`(v12) |
 | `secondKeyboardSlot` / `synthInput1Slot` | 各シンセ入力 Jack の束縛 |
 
 ## 4. 段階
 
-1. **v1(今回)**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
+    ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
+    落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。
+    `MixerView(includeDrums:)` がストリップのアンカー(`DeskAnchorKey`)を出し、
+    机はそこへケーブルを描く。⚠️ 板は傾けない — `rotation3DEffect` の遠近は
+    当たり判定が元の位置に残る(実機 2026-10-01)。遠近は床と縮尺で出す
+1c. **机 = 2.5D の Jack(2026-10-01、mako 赤入れ)**: Jack 面の広い版に、結線図の
+    下として机を置く。`Desk.swift`(配置モデル、0-1 の机座標、window.json の
+    `desk`)+ `DeskView`(`rotation3DEffect` の板に既存部品を乗せる)。操作は
+    実機と同じ入口(`routeKeyboard` / `routeDrums`)。RealityKit への置き換えは
+    配置モデルを残したまま描画だけ差し替える前提
+1b. **汎用鍵盤 + LPD8 顔つまみ(2026-09-26)**: 接続表を純関数に切り出し、未知の
+    鍵盤を自動で刺す。LPD8 ノブ 8 を「顔つまみ」Jack に刺し替えられる(Jack 面の
+    LPD8 ノブ行の切替)。Jack 面の行は機材のセクション単位(Keystage 鍵盤 / ノブ 8、
+    LPD8 パッド / ノブ 8)になり、汎用鍵盤は名前で行が生える
 2. v2: MiniLab ノブ 16 → MIXER Jack(新経路 — gain の手元操作、ROTO MIXER 冊の対)
 3. v3: 接続表のデータ化 + パッチベイ UI(機材セクション × Jack のマトリクス)
 4. v4: 配役シーン(接続 + 束縛のスナップショット保存/呼出 — Page 既定と同じ文法)

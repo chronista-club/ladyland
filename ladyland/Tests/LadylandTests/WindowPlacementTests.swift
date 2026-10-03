@@ -211,12 +211,12 @@ struct SurfaceTabTests {
 
     /// ⚠️ **アイコンだけにしない**（機材名は演奏中に確信を持って選ぶための情報）。
     /// 4 つが別のアイコンであることも固定する — 同じだと探す速さに寄与しない
-    @Test("5 つの面が別々のアイコンと名前を持つ")
+    @Test("6 つの面が別々のアイコンと名前を持つ")
     func iconsAndTitlesAreDistinct() {
         let tabs = SurfaceTab.allCases
-        #expect(tabs.count == 5)
-        #expect(Set(tabs.map(\.icon)).count == 5)
-        #expect(Set(tabs.map(\.title)).count == 5)
+        #expect(tabs.count == 6)
+        #expect(Set(tabs.map(\.icon)).count == 6)
+        #expect(Set(tabs.map(\.title)).count == 6)
         #expect(tabs.allSatisfy { !$0.title.isEmpty })
     }
 

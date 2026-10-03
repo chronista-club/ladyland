@@ -225,12 +225,12 @@ enum KeystageControls {
         KeystageControl(
             name: "ノブ 1-8", emits: .deviceAssigned("位置固定 CC0-63 = ページ × 8 + 位置（設定不要）"),
             handling: .captured(
-                .held("帯は割当の有無に関わらず全部飲む — 割当があれば顔つまみを駆動、未割当はどこへも流さない")),
+                .held("帯は割当の有無に関わらず全部飲む — 割当があれば Track ノブを駆動、未割当はどこへも流さない")),
             reserved: "帯の中に Bank Select(0/32)・Data Entry(6)・Channel Volume(7) 等を含む（飲むので楽器へは届かない）",
             provenance: .measured("2026-08-07")),
         KeystageControl(
             name: "Pitch Bend ホイール", emits: .deviceAssigned("PB（CC ではない）"),
-            handling: .both("割当があれば顔つまみへ / 無ければ楽器へ"),
+            handling: .both("割当があれば Track ノブへ / 無ければ楽器へ"),
             reserved: nil, provenance: .measured("2026-08-05")),
     ]
 
