@@ -1,14 +1,32 @@
 //! 机の描画 — 2.5D（床を遠近で描き、機材は奥ほど小さく。板は傾けない —
 //! `DeskModel.scale` のコメント参照）。
-//! モデルは `Desk.swift`。機材は**いまある部品**をそのまま板に乗せる:
-//! Mixer は `MixerView`、LPD8 はパッド 8 + ノブ 8、鍵盤は 2 オクターブ。
-//! 操作はすべて**実機と同じ入口**（`MIDIRouter.routeKeyboard` / `routeDrums`）を
-//! 通す — latch・和音表示・顔つまみの横取り・trace が全部生きる。
 //!
-//! 結線の刺し替えは機材の上の札（Jack の担当）から。配置は見出しをドラッグ。
+//! **物理層の上に仮想層を重ねる**（mako 2026-10-04「動かせないもの(MIDIコン)を、
+//! 仮想的に配置して、そこにヴァーチャルなコンポーネントを重ねる」）:
+//!
+//! - 物理層 = 機材の板（実機の形）。セクションごとに**ソケット**
+//! - 仮想層 = ケーブル・プラグの札・ノブに重ねるパラメータ名
+//! - 仮想機材 = 奥の Mixer（engine の顔。Jack の箱は無く、ケーブルは直接
+//!   その Track のストリップ / DRUMS に着く）
+//!
+//! 結線図の情報はここに全部畳む（`DeskGraph`）。板に乗らない機材は左の棚。
+//! 操作:
+//! - 板の上で弾く（実機と同じ入口 `routeKeyboard` / `routeDrums` を通す）
+//! - プラグを掴んでストリップへ落とす = 担当の刺し替え（右クリックでも選べる）
+//! - 見出しの ≡ をドラッグ = 配置（window.json に残る）
 
 import CreoUI
 import SwiftUI
+
+/// 机のアンカー（ソケット・ストリップ・Mixer の枠）。Mixer も同じキーで出す
+struct DeskAnchorKey: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(
+        value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]
+    ) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
 
 struct DeskView: View {
     @Environment(\.creoTheme) private var theme
@@ -16,32 +34,97 @@ struct DeskView: View {
 
     /// ドラッグ中の仮の位置（離したら window.json へ）
     @State private var dragging: [DeskGear: DeskPlacement] = [:]
+    /// 掴んでいるプラグ（ソケット id）と指の位置（机の座標）
+    @State private var heldPlug: (socket: String, point: CGPoint)?
+
+    static let shelfWidth: CGFloat = 150
+    static let mixerScale: CGFloat = 0.72
+
+    private var gears: [DeskGear] { DeskModel.gears(sources: appState.midiConnected) }
+
+    private var sockets: [DeskSocket] {
+        DeskGraph.sockets(
+            rows: JackBoardView.gearRows(
+                sources: appState.midiConnected, lpd8KnobJack: appState.lpd8KnobJack),
+            gears: gears)
+    }
+
+    private var bindings: DeskGraph.Bindings {
+        DeskGraph.Bindings(
+            synth1: appState.synthInput1Slot, synth2: appState.secondKeyboardSlot,
+            selected: appState.rack.selected,
+            page: appState.activeKnobPage ?? appState.rotoPage)
+    }
+
+    private var bank: [Int] {
+        MixerModel.bankIndices(
+            selected: appState.rack.selected, trackCount: appState.rack.slots.count)
+    }
 
     var body: some View {
-        GeometryReader { geo in
-            // 置ける範囲は上下に余白（機材の半分が床からはみ出さないように）
-            let size = CGSize(width: geo.size.width, height: geo.size.height - 120)
-            ZStack(alignment: .topLeading) {
-                DeskGround()
-                ForEach(DeskModel.gears(sources: appState.midiConnected)) { gear in
-                    let placement =
-                        dragging[gear]
-                        ?? DeskModel.placement(gear, saved: appState.windowPlacement.deskPlacements)
-                    let point = DeskModel.point(placement, in: size)
-                    gearCard(gear, size: size)
-                        .scaleEffect(DeskModel.scale(depth: placement.depth))
-                        .position(x: point.x, y: point.y + 60)
+        let sockets = sockets
+        HStack(alignment: .top, spacing: 0) {
+            shelf(sockets.filter { $0.home == nil })
+                .frame(width: Self.shelfWidth)
+            GeometryReader { geo in
+                // 置ける範囲は上下に余白（機材の半分が床からはみ出さないように）
+                let size = CGSize(width: geo.size.width, height: geo.size.height - 120)
+                ZStack(alignment: .topLeading) {
+                    DeskGround()
+                    ForEach(gears) { gear in
+                        let placement =
+                            dragging[gear]
+                            ?? DeskModel.placement(gear, saved: appState.windowPlacement.deskPlacements)
+                        let point = DeskModel.point(placement, in: size)
+                        gearCard(gear, sockets: sockets.filter { $0.home == gear }, size: size)
+                            .scaleEffect(DeskModel.scale(depth: placement.depth))
+                            .position(x: point.x, y: point.y + 60)
+                    }
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .coordinateSpace(name: "desk")
+        // 仮想層 — ケーブルとプラグ（アンカーが揃ってから描く）
+        .overlayPreferenceValue(DeskAnchorKey.self) { anchors in
+            GeometryReader { proxy in
+                cables(sockets: sockets, anchors: anchors, proxy: proxy)
+            }
+        }
+    }
+
+    // MARK: - 棚（板の無い機材。挿さっていれば線が出る）
+
+    private func shelf(_ items: [DeskSocket]) -> some View {
+        VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
+            Text("棚")
+                .font(LadylandFont.deskCaption)
+                .foregroundColor(theme.textTertiary)
+            ForEach(items) { socket in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(socket.gear)
+                        .font(LadylandFont.deskHeading)
+                        .lineLimit(1)
+                    socketChip(socket)
+                }
+                .padding(CreoUITokens.spacingS)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
+                        .fill(theme.surfaceSurface))
+                .opacity(socket.connected ? 1 : 0.45)
+                .help(socket.connected ? "接続中" : "未接続（挿すと線が出る）")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(CreoUITokens.spacingS)
     }
 
     // MARK: - 機材の板
 
-    private func gearCard(_ gear: DeskGear, size: CGSize) -> some View {
+    private func gearCard(_ gear: DeskGear, sockets: [DeskSocket], size: CGSize) -> some View {
         VStack(spacing: 4) {
-            // 見出し = 掴むところ（ドラッグで配置）+ Jack の札
+            // 見出し = 掴むところ（ドラッグで配置）
             HStack(spacing: CreoUITokens.spacingS) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 10))
@@ -49,7 +132,9 @@ struct DeskView: View {
                 Text(gear.title)
                     .font(LadylandFont.deskHeading)
                 Spacer(minLength: 0)
-                jackBadge(gear)
+                if gear == .mixer {
+                    badge("T\((bank.first ?? 0) + 1)-\((bank.last ?? 0) + 1)")
+                }
             }
             .contentShape(Rectangle())
             .gesture(
@@ -65,6 +150,13 @@ struct DeskView: View {
                         dragging[gear] = nil
                     }
             )
+            // ソケット（セクションの差込口）
+            if !sockets.isEmpty {
+                HStack(spacing: CreoUITokens.spacingS) {
+                    ForEach(sockets) { socketChip($0) }
+                    Spacer(minLength: 0)
+                }
+            }
             gearBody(gear)
         }
         .padding(CreoUITokens.spacingS)
@@ -76,48 +168,47 @@ struct DeskView: View {
             RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
                 .stroke(theme.surfaceBorderSubtle, lineWidth: 1))
         .fixedSize()
+        .anchorPreference(key: DeskAnchorKey.self, value: .bounds) {
+            gear == .mixer ? ["mixer": $0] : [:]
+        }
+    }
+
+    /// ソケット — Jack の色の丸 + セクション名。ケーブルはここから出る
+    private func socketChip(_ socket: DeskSocket) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .strokeBorder(Self.color(socket.jack, theme), lineWidth: 2)
+                .background(
+                    Circle().fill(socket.connected ? Self.color(socket.jack, theme) : .clear)
+                        .padding(3))
+                .frame(width: 12, height: 12)
+                .anchorPreference(key: DeskAnchorKey.self, value: .bounds) {
+                    ["socket.\(socket.id)": $0]
+                }
+            Text(socket.section)
+                .font(LadylandFont.deskCaption)
+                .foregroundColor(theme.textSecondary)
+        }
     }
 
     @ViewBuilder
     private func gearBody(_ gear: DeskGear) -> some View {
         switch gear {
         case .mixer:
-            MixerView()
-                .scaleEffect(0.72, anchor: .top)
-                .frame(width: 8 * (MixerStrip.width + 6) * 0.72, height: 300 * 0.72, alignment: .top)
+            let width = MixerView.width(strips: bank.count + 1)
+            MixerView(includeDrums: true)
+                .frame(width: width, height: 300)
+                .scaleEffect(Self.mixerScale, anchor: .topLeading)
+                .frame(width: width * Self.mixerScale, height: 300 * Self.mixerScale, alignment: .topLeading)
         case .lpd8:
-            Lpd8DeskView()
+            Lpd8DeskView(
+                selected: appState.rack.selectedSlot, drums: appState.rack.drumSlot)
         case .nanokontrol:
             NanoKontrolDeskView()
         case .keystage, .keyboard:
             DeskKeyboardView(
                 onNoteOn: { appState.router.routeKeyboard(0x90, $0, 100) },
                 onNoteOff: { appState.router.routeKeyboard(0x80, $0, 0) })
-        }
-    }
-
-    // MARK: - Jack の札（担当。ここから刺し替える）
-
-    @ViewBuilder
-    private func jackBadge(_ gear: DeskGear) -> some View {
-        switch gear {
-        case .keystage, .keyboard:
-            trackMenu(title: "鍵盤 1", slot: appState.synthInput1Slot) { appState.synthInput1Slot = $0 }
-        case .nanokontrol:
-            badge("鍵盤 2（結線は次段）")
-        case .lpd8:
-            Picker(
-                "",
-                selection: Binding(get: { appState.lpd8KnobJack }, set: { appState.lpd8KnobJack = $0 })
-            ) {
-                Text("ノブ → ドラム").tag(Lpd8KnobJack.drums)
-                Text("ノブ → 顔つまみ").tag(Lpd8KnobJack.face)
-            }
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(width: 130)
-        case .mixer:
-            badge("T\(appState.rack.bankStart + 1)-\(appState.rack.bankStart + 8)")
         }
     }
 
@@ -130,20 +221,143 @@ struct DeskView: View {
             .background(Capsule().fill(theme.surfaceBgEmphasis))
     }
 
-    /// 担当 Track を選ぶ札（Jack 面の担当ピッカーと同じ中身）
-    private func trackMenu(title: String, slot: Int?, fix: @escaping (Int?) -> Void) -> some View {
-        Menu {
-            Button("選択に追従") { fix(nil) }
-            ForEach(appState.rack.slots, id: \.index) { track in
-                Button(JackBoardView.trackLabel(index: track.index, name: track.trackName ?? "")) {
-                    fix(track.index)
+    // MARK: - 仮想層: ケーブルとプラグ
+
+    /// Jack の色（鍵盤 1 = mint、鍵盤 2 = 第 2 色、Track ノブ = info、ドラム = warning）
+    static func color(_ jack: JackBoardView.JackID, _ theme: CreoTheme) -> Color {
+        switch jack {
+        case .synth1: return theme.brandPrimary
+        case .synth2: return theme.brandSecondary
+        case .trackKnobs: return theme.semanticInfo
+        case .drums: return theme.semanticWarning
+        }
+    }
+
+    @ViewBuilder
+    private func cables(
+        sockets: [DeskSocket], anchors: [String: Anchor<CGRect>], proxy: GeometryProxy
+    ) -> some View {
+        let live = sockets.filter { $0.connected }
+        let mixer = anchors["mixer"].map { proxy[$0] }
+        // 同じ着地点に何本来ているか（プラグを縦に積む）
+        let ends: [(DeskSocket, CGPoint, Int)] = {
+            var stacked: [String: Int] = [:]
+            return live.compactMap { socket in
+                guard let (key, point) = landing(socket, anchors: anchors, proxy: proxy, mixer: mixer)
+                else { return nil }
+                let k = stacked[key, default: 0]
+                stacked[key] = k + 1
+                return (socket, point, k)
+            }
+        }()
+        ZStack(alignment: .topLeading) {
+            ForEach(ends, id: \.0.id) { socket, end, k in
+                if let from = anchors["socket.\(socket.id)"].map({ proxy[$0] }) {
+                    let held = heldPlug?.socket == socket.id ? heldPlug?.point : nil
+                    let plugPoint = held ?? CGPoint(x: end.x, y: end.y + 14 + CGFloat(k) * 20)
+                    cable(from: CGPoint(x: from.midX, y: from.minY), to: plugPoint, jack: socket.jack)
+                    plug(socket, at: plugPoint, anchors: anchors, proxy: proxy, mixer: mixer)
                 }
             }
-        } label: {
-            badge("\(title) → " + (slot.map { "T\($0 + 1)" } ?? "選択に追従"))
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+    }
+
+    /// ケーブルの着地点（キー = 積み上げの単位、点 = ストリップの下端の中央）
+    private func landing(
+        _ socket: DeskSocket, anchors: [String: Anchor<CGRect>], proxy: GeometryProxy,
+        mixer: CGRect?
+    ) -> (String, CGPoint)? {
+        switch DeskGraph.target(socket.jack, bindings) {
+        case .drums:
+            guard let rect = anchors["strip.drums"].map({ proxy[$0] }) else { return nil }
+            return ("drums", CGPoint(x: rect.midX, y: rect.maxY))
+        case .strip(let slot, _):
+            if let rect = anchors["strip.\(slot)"].map({ proxy[$0] }) {
+                return ("strip.\(slot)", CGPoint(x: rect.midX, y: rect.maxY))
+            }
+            // バンク外 — Mixer の右端に着く（札に席番号が出る）
+            guard let mixer else { return nil }
+            return ("offbank", CGPoint(x: mixer.maxX + 40, y: mixer.midY))
+        }
+    }
+
+    private func cable(from: CGPoint, to: CGPoint, jack: JackBoardView.JackID) -> some View {
+        Path { path in
+            path.move(to: from)
+            path.addCurve(
+                to: to,
+                control1: CGPoint(x: from.x, y: from.y - 90),
+                control2: CGPoint(x: to.x, y: to.y + 90))
+        }
+        .stroke(
+            Self.color(jack, theme).opacity(0.85),
+            style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        .shadow(color: .black.opacity(0.4), radius: 2, y: 2)
+        .allowsHitTesting(false)
+    }
+
+    /// プラグ — Jack 名の札。刺し替えられるものは掴んでストリップへ落とす
+    @ViewBuilder
+    private func plug(
+        _ socket: DeskSocket, at point: CGPoint, anchors: [String: Anchor<CGRect>],
+        proxy: GeometryProxy, mixer: CGRect?
+    ) -> some View {
+        let label = Text(DeskGraph.plugLabel(socket.jack, bindings, bank: bank))
+            .font(LadylandFont.deskCaption)
+            .foregroundColor(theme.surfaceBgBase)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Self.color(socket.jack, theme)))
+            .fixedSize()
+            .position(point)
+        if socket.repluggable {
+            label
+                .gesture(
+                    DragGesture(coordinateSpace: .named("desk"))
+                        .onChanged { heldPlug = (socket.id, $0.location) }
+                        .onEnded { value in
+                            heldPlug = nil
+                            var strips: [Int: CGRect] = [:]
+                            for (key, anchor) in anchors where key.hasPrefix("strip.") {
+                                if let i = Int(key.dropFirst("strip.".count)) { strips[i] = proxy[anchor] }
+                            }
+                            let drop = DeskGraph.dropTarget(
+                                at: value.location, strips: strips,
+                                drums: anchors["strip.drums"].map { proxy[$0] }, mixer: mixer)
+                            apply(DeskGraph.rebind(socket, drop: drop))
+                        }
+                )
+                .contextMenu { plugMenu(socket) }
+                .help("掴んでストリップへ落とすと刺し替え（Mixer の外 = 選択に追従）")
+        } else {
+            label.allowsHitTesting(false)
+        }
+    }
+
+    /// 右クリックの近道（ドラッグが面倒なとき）
+    @ViewBuilder
+    private func plugMenu(_ socket: DeskSocket) -> some View {
+        if socket.id == "lpd8.knobs" {
+            Button("ドラム") { apply(.lpd8Knobs(.drums)) }
+            Button("Track ノブ") { apply(.lpd8Knobs(.face)) }
+        } else {
+            let fix: (Int?) -> DeskRebind = socket.jack == .synth2 ? { .synth2($0) } : { .synth1($0) }
+            Button("選択に追従") { apply(fix(nil)) }
+            ForEach(appState.rack.slots, id: \.index) { track in
+                Button(JackBoardView.trackLabel(index: track.index, name: track.trackName ?? "")) {
+                    apply(fix(track.index))
+                }
+            }
+        }
+    }
+
+    private func apply(_ rebind: DeskRebind) {
+        switch rebind {
+        case .synth1(let slot): appState.synthInput1Slot = slot
+        case .synth2(let slot): appState.secondKeyboardSlot = slot
+        case .lpd8Knobs(let jack): appState.lpd8KnobJack = jack
+        case .none: break
+        }
     }
 }
 
@@ -262,6 +476,9 @@ struct DeskKeyboardView: View {
 struct Lpd8DeskView: View {
     @Environment(\.creoTheme) private var theme
     @EnvironmentObject private var appState: AppState
+    /// 仮想層の材料 — ノブに重ねる割当名（Track ノブ = 選択中、ドラム = ドラム席）
+    @ObservedObject var selected: InstrumentSlot
+    @ObservedObject var drums: InstrumentSlot
 
     @State private var down: Set<Int> = []
     @State private var knobs: [Int] = Array(repeating: 64, count: 8)
@@ -278,10 +495,10 @@ struct Lpd8DeskView: View {
                     }
                 }
             }
-            // ノブ: K1-K8（2 段）
+            // ノブ: K1-K8（2 段）。下にいまの割当名を重ねる
             VStack(spacing: 4) {
                 ForEach(0..<2, id: \.self) { row in
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         ForEach(0..<4, id: \.self) { col in
                             knob(row * 4 + col)
                         }
@@ -315,8 +532,15 @@ struct Lpd8DeskView: View {
             )
     }
 
+    private func knobLabel(_ index: Int) -> String? {
+        DeskGraph.lpd8KnobLabel(
+            index: index, jack: appState.lpd8KnobJack, knobCCs: appState.lpd8KnobCCs,
+            page: appState.activeKnobPage ?? appState.rotoPage,
+            selected: selected.knobMappings, drums: drums.knobMappings)
+    }
+
     /// ノブ — 上下ドラッグで 0-127。実機と同じ CC を drums 経路へ流す
-    /// （刺し先が顔つまみでも drums でも、横取りは router が決める）
+    /// （刺し先が Track ノブでも drums でも、横取りは router が決める）
     private func knob(_ index: Int) -> some View {
         let value = knobs[index]
         return ZStack {
@@ -328,11 +552,15 @@ struct Lpd8DeskView: View {
         }
         .frame(width: 24, height: 24)
         .overlay(
-            Text("K\(index + 1)")
+            // 仮想層 — いまこのノブが動かすパラメータ名（空きは K 番号）
+            Text(knobLabel(index) ?? "K\(index + 1)")
                 .font(.system(size: 7))
-                .foregroundColor(theme.textTertiary)
+                .foregroundColor(knobLabel(index) == nil ? theme.textTertiary : theme.textSecondary)
+                .lineLimit(1)
+                .frame(width: 40)
                 .offset(y: 16))
         .padding(.bottom, 8)
+        .frame(width: 34)
         .gesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { drag in

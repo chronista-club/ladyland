@@ -242,12 +242,12 @@ struct JackBoardRowsTests {
         #expect(second.first { $0.id == "keystage.keys" }?.connected == true)
     }
 
-    @Test("Keystage / LPD8 はセクションごとの行 — ノブ 8 は顔つまみ Jack に刺さる")
+    @Test("Keystage / LPD8 はセクションごとの行 — ノブ 8 は Track ノブ Jack に刺さる")
     func sectionRows() {
         let rows = JackBoardView.gearRows(sources: [], lpd8KnobJack: .face)
-        #expect(rows.first { $0.id == "keystage.knobs" }?.jack == .faceKnobs)
+        #expect(rows.first { $0.id == "keystage.knobs" }?.jack == .trackKnobs)
         #expect(rows.first { $0.id == "lpd8.pads" }?.jack == .drums)
-        #expect(rows.first { $0.id == "lpd8.knobs" }?.jack == .faceKnobs)
+        #expect(rows.first { $0.id == "lpd8.knobs" }?.jack == .trackKnobs)
         #expect(rows.first { $0.id == "keystage.keys" }?.connected == false, "未接続は線が消える")
 
         let drums = JackBoardView.gearRows(sources: [], lpd8KnobJack: .drums)

@@ -37,6 +37,15 @@ struct MixerView: View {
     @Environment(\.creoTheme) private var theme
     @EnvironmentObject private var appState: AppState
 
+    /// 右端にドラム席のストリップを足す（机 — ドラムのケーブルの着地点）
+    var includeDrums = false
+
+    /// 面の幅（ストリップ n 本 + 間隔 + 余白）。机が縮尺の前の寸法に使う
+    static func width(strips n: Int) -> CGFloat {
+        CGFloat(n) * MixerStrip.width + CGFloat(max(n - 1, 0)) * CreoUITokens.spacingS
+            + 2 * CreoUITokens.spacingM
+    }
+
     var body: some View {
         let indices = MixerModel.bankIndices(
             selected: appState.rack.selected, trackCount: appState.rack.slots.count)
@@ -48,6 +57,20 @@ struct MixerView: View {
                     onSelect: { appState.select(index) },
                     onGain: { appState.setGain(appState.rack.slots[index], to: $0) },
                     onMute: { appState.toggleMute(appState.rack.slots[index]) })
+                    // 机のケーブルの着地点（Mixer タブでは誰も読まない）
+                    .anchorPreference(key: DeskAnchorKey.self, value: .bounds) {
+                        ["strip.\(index)": $0]
+                    }
+            }
+            if includeDrums {
+                MixerStrip(
+                    slot: appState.rack.drumSlot, isSelected: false, title: "DRUMS",
+                    onSelect: {},
+                    onGain: { appState.setGain(appState.rack.drumSlot, to: $0) },
+                    onMute: { appState.toggleMute(appState.rack.drumSlot) })
+                    .anchorPreference(key: DeskAnchorKey.self, value: .bounds) {
+                        ["strip.drums": $0]
+                    }
             }
         }
         .padding(CreoUITokens.spacingM)
@@ -60,6 +83,8 @@ struct MixerStrip: View {
     @Environment(\.creoTheme) private var theme
     @ObservedObject var slot: InstrumentSlot
     let isSelected: Bool
+    /// 見出しの上書き（ドラム席は「DRUMS」）
+    var title: String? = nil
     let onSelect: () -> Void
     let onGain: (Float) -> Void
     let onMute: () -> Void
@@ -73,7 +98,7 @@ struct MixerStrip: View {
                 Circle()
                     .fill(slot.rotoColor.map(RotoPaletteMap.color) ?? theme.textTertiary.opacity(0.4))
                     .frame(width: 8, height: 8)
-                Text(MixerModel.title(index: slot.index, trackName: slot.trackName))
+                Text(title ?? MixerModel.title(index: slot.index, trackName: slot.trackName))
                     .font(LadylandFont.deskCaption)
                     .foregroundColor(isSelected ? theme.textPrimary : theme.textSecondary)
                     .lineLimit(1)

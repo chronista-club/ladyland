@@ -69,13 +69,13 @@ enum MidiTraceFormat {
     ) -> (key: String?, text: String) {
         switch route {
         case .knob(let cc, let value) where cc == 128:
-            return ("knob-pb", "Keystage PB ホイール = \(value) → 顔つまみ")
+            return ("knob-pb", "Keystage PB ホイール = \(value) → Track ノブ")
         case .knob(let cc, let value):
-            return ("knob-\(cc)", "Keystage ノブ (CC\(cc)) = \(value) → 顔つまみ")
+            return ("knob-\(cc)", "Keystage ノブ (CC\(cc)) = \(value) → Track ノブ")
         case .drumKnob(let cc, let value):
-            return ("drumknob-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → ドラム顔つまみ")
+            return ("drumknob-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → ドラムのノブ")
         case .lpd8FaceKnob(let cc, let value):
-            return ("lpd8face-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → 顔つまみ \(selectedSlot)")
+            return ("lpd8face-\(cc)", "LPD8 ノブ (CC\(cc)) = \(value) → Track ノブ \(selectedSlot)")
         case .allSoundOff:
             // 押すたびに残す（畳まない）— 音が止まった理由は履歴で追えないと困る
             return (nil, "CC120 All Sound Off → パニック（全消音）")

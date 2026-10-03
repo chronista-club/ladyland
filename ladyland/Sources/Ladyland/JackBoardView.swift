@@ -1,12 +1,18 @@
-//! Jack 結線図（spec/09 / design/08。mako 裁定 2026-08-25「b（2 カラム結線）が
-//! わかりやすいね」）。**左 = 機材セクション、右 = Jack、間をケーブルで結ぶ** —
+//! Jack 面（spec/09 / design/08）。**幅で姿が変わる**:
+//!
+//! - 広い版（別ウィンドウ）= **机**（`DeskView`）。結線図の情報は全部机に畳んだ
+//!   （mako 2026-10-04「統一させて一つのビューに情報まとめよう」）
+//! - サイドバー版 = 結線図（mako 裁定 2026-08-25「b（2 カラム結線）が
+//!   わかりやすいね」）。机が十分になったら引退させる
+//!
+//! 以下は結線図の説明。**左 = 機材セクション、右 = Jack、間をケーブルで結ぶ** —
 //! NodeGraph の「ケーブルが見える」楽しさだけを頂き、座標管理は持たない
 //! （両端が固定リストなので線は自動で決まる）。
 //!
 //! 接続は `MIDIInput.plan`（名前 → 経路）の写し。**未知の鍵盤は名前で行になる**
 //! （Keystage 不在なら鍵盤 1、居れば鍵盤 2 — mako 裁定 2026-09-26「スタジオの
 //! MIDI 鍵盤を Keystage の代わりに」）。操作できるのは Jack 側の束縛（担当
-//! Track）と **LPD8 ノブ 8 の刺し先**（ドラム / 顔つまみ）。演奏前チェックが
+//! Track）と **LPD8 ノブ 8 の刺し先**（ドラム / Track ノブ）。演奏前チェックが
 //! 主用途 — 「いま誰がどこ？」が一目で分かること。
 
 import CreoUI
@@ -19,9 +25,9 @@ struct JackBoardView: View {
     // MARK: - 姿（幅で決まる。別ウィンドウに切り離すと広い版になる）
 
     enum Layout: Equatable {
-        /// サイドバー版 — 2 列（機材 → Jack）、担当は「選択中の席に固定」
+        /// サイドバー版 — 結線図 2 列（機材 → Jack）、担当は「選択中の席に固定」
         case sidebar
-        /// 広い版 — 3 列（機材 → Jack → 担当）、担当は Track のピッカーで直接選ぶ
+        /// 広い版 — 机（2.5D。弾く・刺し替える・並べ替える）
         case wide
     }
 
@@ -39,7 +45,7 @@ struct JackBoardView: View {
     // MARK: - 行モデル（`MIDIInput.plan` の結線と対。機材は**セクション単位**）
 
     enum JackID: String, CaseIterable {
-        case synth1, synth2, faceKnobs, drums
+        case synth1, synth2, trackKnobs, drums
     }
 
     struct GearRow: Identifiable, Equatable {
@@ -59,7 +65,7 @@ struct JackBoardView: View {
         let lpd8 = has(.drums)
         var rows: [GearRow] = [
             GearRow(id: "keystage.keys", gear: "Keystage", section: "鍵盤", jack: .synth1, connected: keystage),
-            GearRow(id: "keystage.knobs", gear: "Keystage", section: "ノブ 8", jack: .faceKnobs, connected: keystage),
+            GearRow(id: "keystage.knobs", gear: "Keystage", section: "ノブ 8", jack: .trackKnobs, connected: keystage),
             GearRow(id: "pckb", gear: "PC キーボード", section: "Tab 演奏モード", jack: .synth1, connected: true),
         ]
         // 汎用鍵盤（挿さっているものだけ。抜けば行ごと消える）
@@ -79,7 +85,7 @@ struct JackBoardView: View {
         rows.append(
             GearRow(
                 id: "lpd8.knobs", gear: "LPD8", section: "ノブ 8",
-                jack: lpd8KnobJack == .face ? .faceKnobs : .drums, connected: lpd8))
+                jack: lpd8KnobJack == .face ? .trackKnobs : .drums, connected: lpd8))
         return rows
     }
 
@@ -89,11 +95,14 @@ struct JackBoardView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            board(Self.layout(forWidth: geometry.size.width))
+            switch Self.layout(forWidth: geometry.size.width) {
+            case .wide: DeskView()
+            case .sidebar: board
+            }
         }
     }
 
-    private func board(_ layout: Layout) -> some View {
+    private var board: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: CreoUITokens.spacingL) {
                 HStack(alignment: .top, spacing: 0) {
@@ -106,29 +115,16 @@ struct JackBoardView: View {
                                 ) { ["gear.\(row.id)": $0] }
                         }
                     }
-                    Spacer(minLength: layout == .wide ? 80 : 36)
-                    // 右列 — Jack（広い版はその右に担当の列が並ぶ）
+                    Spacer(minLength: 36)
+                    // 右列 — Jack
                     VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
                         ForEach(JackID.allCases, id: \.self) { jack in
-                            HStack(alignment: .top, spacing: CreoUITokens.spacingM) {
-                                jackCard(jack, layout: layout)
-                                    .anchorPreference(key: JackAnchorKey.self, value: .leading) {
-                                        ["jack.\(jack.rawValue)": $0]
-                                    }
-                                if layout == .wide {
-                                    assigneeCard(jack)
+                            jackCard(jack)
+                                .anchorPreference(key: JackAnchorKey.self, value: .leading) {
+                                    ["jack.\(jack.rawValue)": $0]
                                 }
-                            }
                         }
                     }
-                    if layout == .wide { Spacer(minLength: 0) }
-                }
-                // 机（2.5D の Jack。mako 赤入れ 2026-10-01）— 広い版だけ。
-                // 結線図の下に、同じ機材を机の上に置いて**その上で弾く・刺し替える**
-                if layout == .wide {
-                    DeskView()
-                        .frame(height: 420)
-                        .clipped()
                 }
             }
             .padding(CreoUITokens.spacingM)
@@ -173,7 +169,7 @@ struct JackBoardView: View {
                         set: { appState.lpd8KnobJack = $0 })
                 ) {
                     Text("ドラム").tag(Lpd8KnobJack.drums)
-                    Text("顔つまみ").tag(Lpd8KnobJack.face)
+                    Text("Track ノブ").tag(Lpd8KnobJack.face)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -196,19 +192,19 @@ struct JackBoardView: View {
     }
 
     @ViewBuilder
-    private func jackCard(_ jack: JackID, layout: Layout) -> some View {
+    private func jackCard(_ jack: JackID) -> some View {
         switch jack {
         case .synth1:
             bindableJackCard(
-                title: "鍵盤 1", slot: appState.synthInput1Slot, layout: layout,
+                title: "鍵盤 1", slot: appState.synthInput1Slot,
                 fix: { appState.synthInput1Slot = $0 })
         case .synth2:
             bindableJackCard(
-                title: "鍵盤 2", slot: appState.secondKeyboardSlot, layout: layout,
+                title: "鍵盤 2", slot: appState.secondKeyboardSlot,
                 fix: { appState.secondKeyboardSlot = $0 })
-        case .faceKnobs:
+        case .trackKnobs:
             VStack(alignment: .leading, spacing: 2) {
-                Text("顔つまみ")
+                Text("Track ノブ")
                     .font(LadylandFont.deskHeading)
                 Text("担当: 選択中の Track（P\((appState.activeKnobPage ?? appState.rotoPage) + 1)）")
                     .font(LadylandFont.deskCaption)
@@ -244,7 +240,7 @@ struct JackBoardView: View {
     /// 担当 Track を持つ Jack（シンセ入力）のカード。
     /// 操作は「選択中の席に固定 / 解除」— タイル右クリックの対になる第 2 の口
     private func bindableJackCard(
-        title: String, slot: Int?, layout: Layout, fix: @escaping (Int?) -> Void
+        title: String, slot: Int?, fix: @escaping (Int?) -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -252,17 +248,14 @@ struct JackBoardView: View {
             Text(slot.map { "担当: T\($0 + 1)" } ?? "担当: 選択に追従")
                 .font(LadylandFont.deskCaption)
                 .foregroundColor(slot == nil ? theme.textSecondary : theme.brandPrimary)
-            // 広い版は担当の列（assigneeCard）で選ぶので、ここにはボタンを置かない。
-            // サイドバー版のボタンは 2 行目 — 1 行に詰めると sidebar 幅で見切れる
-            // （実機スクショ 2026-08-25）
-            if layout == .sidebar {
-                if slot == nil {
-                    Button("選択中の席に固定") { fix(appState.rack.selected) }
-                        .font(LadylandFont.deskCaption)
-                } else {
-                    Button("解除（選択に追従）") { fix(nil) }
-                        .font(LadylandFont.deskCaption)
-                }
+            // ボタンは 2 行目 — 1 行に詰めると sidebar 幅で見切れる
+            // （実機スクショ 2026-08-25）。広い版は机のプラグで刺し替える
+            if slot == nil {
+                Button("選択中の席に固定") { fix(appState.rack.selected) }
+                    .font(LadylandFont.deskCaption)
+            } else {
+                Button("解除（選択に追従）") { fix(nil) }
+                    .font(LadylandFont.deskCaption)
             }
         }
         .padding(CreoUITokens.spacingS)
@@ -273,47 +266,6 @@ struct JackBoardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
                 .stroke(theme.surfaceBorderSubtle, lineWidth: 1))
-    }
-
-    /// 担当の列（広い版だけ）— Track を名前で直接選ぶ。「Keystage = A、MiniLab = B」を
-    /// 広い画面で一発で組む口（鍵盤 2 の設営）。ドラムは固定なので選べない
-    @ViewBuilder
-    private func assigneeCard(_ jack: JackID) -> some View {
-        switch jack {
-        case .synth1:
-            trackPicker(slot: appState.synthInput1Slot) { appState.synthInput1Slot = $0 }
-        case .synth2:
-            trackPicker(slot: appState.secondKeyboardSlot) { appState.secondKeyboardSlot = $0 }
-        case .faceKnobs:
-            Text("選択中の Track")
-                .font(LadylandFont.deskCaption)
-                .foregroundColor(theme.textTertiary)
-                .padding(CreoUITokens.spacingS)
-                .frame(width: 260, alignment: .leading)
-        case .drums:
-            Text("ドラム席")
-                .font(LadylandFont.deskCaption)
-                .foregroundColor(theme.textTertiary)
-                .padding(CreoUITokens.spacingS)
-                .frame(width: 260, alignment: .leading)
-        }
-    }
-
-    private func trackPicker(slot: Int?, fix: @escaping (Int?) -> Void) -> some View {
-        Picker(
-            "",
-            selection: Binding(
-                get: { slot ?? -1 },
-                set: { fix($0 < 0 ? nil : $0) })
-        ) {
-            Text("選択に追従").tag(-1)
-            ForEach(appState.rack.slots, id: \.index) { track in
-                Text(Self.trackLabel(index: track.index, name: track.trackName ?? "")).tag(track.index)
-            }
-        }
-        .labelsHidden()
-        .frame(width: 260, alignment: .leading)
-        .padding(.vertical, CreoUITokens.spacingS)
     }
 
     /// ケーブル 1 本（水平ベジェ — パッチベイの垂れたケーブルの気持ちで

@@ -241,7 +241,7 @@ struct LlDataSnapshot {
                 ]),
             KDLNode(
                 name: "node", args: [.string("knob")],
-                props: ["doc": .string("顔つまみ割当（cc = Ctrl 番号 0-127 / 128 = PB）")]),
+                props: ["doc": .string("Track ノブの割当（cc = Ctrl 番号 0-127 / 128 = PB）")]),
             KDLNode(
                 name: "node", args: [.string("draft")],
                 props: ["doc": .string("席の棚の 1 着（工房と舞台の分離。design/06 §8）")]),

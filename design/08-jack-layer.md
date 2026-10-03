@@ -41,6 +41,12 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
+    ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
+    落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。
+    `MixerView(includeDrums:)` がストリップのアンカー(`DeskAnchorKey`)を出し、
+    机はそこへケーブルを描く。⚠️ 板は傾けない — `rotation3DEffect` の遠近は
+    当たり判定が元の位置に残る(実機 2026-10-01)。遠近は床と縮尺で出す
 1c. **机 = 2.5D の Jack(2026-10-01、mako 赤入れ)**: Jack 面の広い版に、結線図の
     下として机を置く。`Desk.swift`(配置モデル、0-1 の机座標、window.json の
     `desk`)+ `DeskView`(`rotation3DEffect` の板に既存部品を乗せる)。操作は
