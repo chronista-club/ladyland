@@ -275,11 +275,11 @@ final class Desk3DScene {
     /// 仮想の部品 — 半透明に光る板 + 名前。掴めるように当たりを持たせる
     private func componentEntity(_ component: VirtualComponent, theme: CreoTheme) -> Entity {
         let color: NSColor = NSColor(component == .mixer ? theme.brandPrimary : theme.semanticInfo)
-        func glass(_ opacity: Float) -> PhysicallyBasedMaterial {
+        func glass(_ opacity: Float, glow: Float = 0.6) -> PhysicallyBasedMaterial {
             var material = PhysicallyBasedMaterial()
             material.baseColor = .init(tint: color)
             material.emissiveColor = .init(color: color)
-            material.emissiveIntensity = 0.6
+            material.emissiveIntensity = glow
             material.blending = .transparent(opacity: .init(floatLiteral: opacity))
             return material
         }
@@ -303,19 +303,24 @@ final class Desk3DScene {
         root.addChild(plate)
         flats[component] = plate
 
-        // 帯（載ったとき）— 契約に合うセクションを機材ごと包む
+        // 帯（載ったとき）— 契約に合うセクションの**機材ごと**包む。幅は機材の
+        // 外形いっぱい（mako 赤入れ 2026-10-04: 左端まで覆う矢印）
         if let gear = placedGears.first(where: { g in g.blueprint.sections.contains { component.canDock(on: $0) } }),
             let section = gear.blueprint.sections.first(where: { component.canDock(on: $0) }),
             let bounds = gearBounds[gear.blueprint.id]
         {
-            let rect = gear.blueprint.footprint(of: section).offsetBy(dx: gear.origin.x, dy: gear.origin.y)
+            let rect = CGRect(
+                x: CGFloat(bounds.min.x * 1000), y: CGFloat(bounds.min.z * 1000),
+                width: CGFloat((bounds.max.x - bounds.min.x) * 1000),
+                height: CGFloat((bounds.max.z - bounds.min.z) * 1000))
             let frames = Desk3DMath.sleeve(
                 section: rect, gearMinZ: bounds.min.z, gearMaxZ: bounds.max.z, top: bounds.max.y)
             let wrap = Entity()
             for (name, frame) in frames {
                 let piece = ModelEntity(
                     mesh: .generateBox(size: frame.size, cornerRadius: 0.0005),
-                    materials: [glass(name == "top" ? 0.28 : 0.4)])
+                    // 上の面は薄く — 下の操作子が見えるように（同赤入れ「この面は背景薄く」）
+                    materials: [name == "top" ? glass(0.1, glow: 0.15) : glass(0.4)])
                 piece.position = frame.center
                 if name == "top" {
                     // 掴むのは上の板（外すときは手前へ引き出す）
