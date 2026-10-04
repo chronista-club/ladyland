@@ -20,7 +20,9 @@ import Foundation
 
 /// 部品 1 つ（可動部は名前で掴む）
 struct GearPart: Equatable {
-    enum Kind: Equatable { case fader, knob, button }
+    /// 操作子の種類（Blender の配置データの kind をここへ読み替える）。
+    /// knob / encoder → knob、key_white / key_black → key、display などの飾り → other
+    enum Kind: Equatable { case fader, knob, button, pad, key, other }
     let name: String
     let kind: Kind
     /// 天面上の中心（x, z）mm
@@ -33,7 +35,7 @@ struct GearPart: Equatable {
 
 /// 機材のセクション（Jack の契約の単位 — 同じ種類の操作子の列）
 struct GearSection: Equatable {
-    enum Kind: Equatable { case faders, knobs, buttons }
+    enum Kind: Equatable { case faders, knobs, buttons, pads, keys }
     let id: String
     let kind: Kind
     /// 列の部品名（左から）
@@ -154,9 +156,10 @@ enum VirtualComponent: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// 載せられるか — 能力の種類が合い、8 本そろっている
+    /// 載せられるか — 能力の種類が合い、8 本そろっている（CC の表は問わない —
+    /// MIDI の結線がまだの機材にも、まず載せて形を確かめられるように）
     func canDock(on section: GearSection) -> Bool {
-        section.kind == requires && section.ccs.count >= 8
+        section.kind == requires && section.parts.count >= 8
     }
 }
 
@@ -182,6 +185,15 @@ enum DockModel {
                 if rect.contains(point) { return section }
             }
         }
+        return nil
+    }
+
+    /// LPD8 のノブ列に Track ノブを載せた / 外したときの LPD8 のノブの刺し先
+    /// （nil = LPD8 に関係しない載せ替え — 手で選んだ刺し先に触らない）
+    static func lpd8Jack(before: String?, after: String?) -> Lpd8KnobJack? {
+        let lpd8 = "lpd8.knobs"
+        if after == lpd8 { return .face }
+        if before == lpd8 { return .drums }
         return nil
     }
 
@@ -236,4 +248,130 @@ enum SurfaceMapping {
         }
         return nil
     }
+}
+
+
+// MARK: - Blender の配置データ（`Gear/<id>.json`）
+
+extension GearBlueprint {
+    private struct JSONPart: Decodable {
+        let name: String
+        let kind: String
+        let center: [Float]
+        let size: [Float]
+        let travel: Float?
+    }
+    private struct JSONSection: Decodable {
+        let id: String
+        let kind: String
+        let parts: [String]
+        let ccs: [Int]?
+    }
+    private struct JSONSpec: Decodable {
+        let id: String
+        let title: String
+        let size: [Float]
+        let body_height: Float
+        let parts: [JSONPart]
+        let sections: [JSONSection]
+    }
+
+    /// `gear_build.py` が書き出す配置データ（鍵盤は展開済み）を読む。
+    /// JSON は W × D × H / 部品は w × d × h — 内部は x × y(高さ) × z に並べ替える
+    static func decode(_ data: Data) throws -> GearBlueprint {
+        let spec = try JSONDecoder().decode(JSONSpec.self, from: data)
+        func kind(_ k: String) -> GearPart.Kind {
+            switch k {
+            case "knob", "encoder": return .knob
+            case "fader": return .fader
+            case "button": return .button
+            case "pad": return .pad
+            case "key_white", "key_black": return .key
+            default: return .other
+            }
+        }
+        func sectionKind(_ k: String) -> GearSection.Kind {
+            switch k {
+            case "faders": return .faders
+            case "knobs": return .knobs
+            case "pads": return .pads
+            case "keys": return .keys
+            default: return .buttons
+            }
+        }
+        let parts = spec.parts.map { p in
+            GearPart(
+                name: p.name, kind: kind(p.kind), center: [p.center[0], p.center[1]],
+                size: [p.size[0], p.size[2], p.size[1]], travel: p.travel ?? 0)
+        }
+        let sections = spec.sections.map { s in
+            GearSection(
+                id: s.id, kind: sectionKind(s.kind), parts: s.parts, ccs: (s.ccs ?? []).map { UInt8(clamping: $0) })
+        }
+        var blueprint = GearBlueprint(
+            id: spec.id, title: spec.title, size: [spec.size[0], spec.size[2], spec.size[1]],
+            parts: parts, sections: sections)
+        blueprint.bodyHeight = spec.body_height
+        return blueprint
+    }
+}
+
+// MARK: - 机の上の並び（`Gear/desk_layout.json` — アプリと Blender が両方読む）
+
+struct DeskLayout {
+    struct Entry {
+        let id: String
+        /// 機材の中心（机の mm）
+        let center: CGPoint
+        /// 上から見た外形（mm）
+        let size: CGSize
+        var footprint: CGRect {
+            CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height)
+        }
+    }
+    let deskCenter: CGPoint
+    let deskSize: CGSize
+    let gear: [Entry]
+    /// 仮想の部品の置き場（raw 値 → 机の mm）
+    let tray: [String: CGPoint]
+    let cameraFrom: SIMD3<Float>
+    let cameraAt: SIMD3<Float>
+    let fieldOfView: Float
+
+    var deskRect: CGRect {
+        CGRect(
+            x: deskCenter.x - deskSize.width / 2, y: deskCenter.y - deskSize.height / 2,
+            width: deskSize.width, height: deskSize.height)
+    }
+
+    private struct JSON: Decodable {
+        struct Desk: Decodable { let center: [Double]; let size: [Double] }
+        struct Gear: Decodable { let id: String; let center: [Double]; let size: [Double] }
+        struct Camera: Decodable { let from: [Float]; let at: [Float]; let fov: Float }
+        let desk: Desk
+        let gear: [Gear]
+        let tray: [String: [Double]]
+        let camera: Camera
+    }
+
+    static func decode(_ data: Data) throws -> DeskLayout {
+        let j = try JSONDecoder().decode(JSON.self, from: data)
+        let mm: ([Float]) -> SIMD3<Float> = { SIMD3($0[0], $0[1], $0[2]) / 1000 }
+        return DeskLayout(
+            deskCenter: CGPoint(x: j.desk.center[0], y: j.desk.center[1]),
+            deskSize: CGSize(width: j.desk.size[0], height: j.desk.size[1]),
+            gear: j.gear.map {
+                Entry(id: $0.id, center: CGPoint(x: $0.center[0], y: $0.center[1]),
+                      size: CGSize(width: $0.size[0], height: $0.size[1]))
+            },
+            tray: j.tray.mapValues { CGPoint(x: $0[0], y: $0[1]) },
+            cameraFrom: mm(j.camera.from), cameraAt: mm(j.camera.at), fieldOfView: j.camera.fov)
+    }
+
+    /// 並びが見つからないとき — nanoKONTROL2 だけを机の真ん中に
+    static let fallback = DeskLayout(
+        deskCenter: CGPoint(x: 0, y: 40), deskSize: CGSize(width: 900, height: 420),
+        gear: [Entry(id: "nanokontrol", center: .zero, size: CGSize(width: 325, height: 83))],
+        tray: ["mixer": CGPoint(x: -120, y: 115), "trackKnobs": CGPoint(x: 120, y: 115)],
+        cameraFrom: [0, 0.33, 0.37], cameraAt: [0, 0.01, 0.045], fieldOfView: 40)
 }

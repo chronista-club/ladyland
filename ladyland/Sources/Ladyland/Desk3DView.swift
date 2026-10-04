@@ -107,7 +107,14 @@ struct Desk3DView: View {
                     let section = point.flatMap {
                         DockModel.section(for: component, at: $0, gears: scene.placedGears)
                     }
+                    let before = appState.windowPlacement.docks?[component.rawValue]
                     appState.windowPlacement.setDock(component, on: section?.id)
+                    // LPD8 のノブ列に Track ノブを載せる = LPD8 のノブを Track ノブへ刺す
+                    if component == .trackKnobs,
+                        let jack = DockModel.lpd8Jack(before: before, after: section?.id)
+                    {
+                        appState.lpd8KnobJack = jack
+                    }
                     scene.endDrag(component)
                 }
         )
@@ -124,25 +131,31 @@ struct Desk3DView: View {
 /// またいで同じものを指すよう `@State` で 1 つだけ持つ
 @MainActor
 final class Desk3DScene {
-    /// 部品が浮く高さ（m）— 機材の天面より上
-    static let hoverY: Float = 0.07  // mako 2026-10-04「ミキサーのレイヤーをもう少し上げられる？」
-    /// 机に置いた機材（いまは nanoKONTROL2 だけ。机座標 mm の中心）
-    let placedGears = [PlacedGear(blueprint: .nanoKontrol2, origin: CGPoint(x: 0, y: 0))]
+    /// 掴んだ部品が浮く高さ（m）— 一番背の高い機材（Keystage 82 mm）より上
+    static let hoverY: Float = 0.12
+
+    /// 机の上の並び（`Gear/desk_layout.json` の写し。無ければ nanoKONTROL2 だけ）
+    private(set) var layout = DeskLayout.fallback
+    /// 机に置いた機材（机座標 mm での中心）
+    private(set) var placedGears: [PlacedGear] = []
 
     var subscription: EventSubscription?
     private var root = Entity()
-    /// 部品名 → エンティティ（フェーダーのつまみ・M ボタン）と、つまみの初期位置
+    private var theme: CreoTheme?
+    /// 「機材 id / 部品名」→ エンティティ（フェーダーのつまみ・M ボタン）と初期位置。
+    /// 部品名（knob_1 など）は機材をまたいで重なるので、機材 id を前に付ける
     private var parts: [String: Entity] = [:]
     private var partHome: [String: SIMD3<Float>] = [:]
     private var buttonMaterials: (normal: any RealityKit.Material, lit: any RealityKit.Material)?
     private var components: [VirtualComponent: Entity] = [:]
-    /// 部品ごとの 2 つの姿 — 平たい板（置き場・掴み中）と帯（載ったとき）
+    /// 部品ごとの 2 つの姿 — 平たい板（置き場・掴み中）と帯（載ったとき。載った先ごとに作る）
     private var flats: [VirtualComponent: Entity] = [:]
     private var wraps: [VirtualComponent: (entity: Entity, section: String)] = [:]
-    /// 機材の外形（机の座標 m）— 帯の寸法に使う
+    /// 機材の外形（机の座標 m）— 帯の寸法と浮く高さに使う
     private var gearBounds: [String: BoundingBox] = [:]
     /// M ボタンの元の材質（清書した USDZ の材質に戻すため）
     private var muteNormal: [Int: [any RealityKit.Material]] = [:]
+    private var light: Entity?
 
     /// 名前付き部品の「形」— USDZ では入れ物（Xform）の子に形（Mesh）が付く
     static func model(of entity: Entity) -> ModelEntity? {
@@ -156,20 +169,45 @@ final class Desk3DScene {
 
     // MARK: - 組み立て
 
+    /// 机に置く機材を集める — nanoKONTROL2 は下書き（Swift）、ほかは Blender の配置データ
+    static func catalog() -> [String: GearBlueprint] {
+        var all: [String: GearBlueprint] = ["nanokontrol": .nanoKontrol2]
+        let files = (try? FileManager.default.contentsOfDirectory(at: gearDirectory, includingPropertiesForKeys: nil)) ?? []
+        for url in files where url.pathExtension == "json" && url.lastPathComponent != "desk_layout.json" {
+            if let data = try? Data(contentsOf: url), let blueprint = try? GearBlueprint.decode(data) {
+                all[blueprint.id] = blueprint
+            }
+        }
+        return all
+    }
+
     func build(theme: CreoTheme) async -> Entity {
+        self.theme = theme
         root = Entity()
         root.name = "desk3d"
         let lit = SimpleMaterial(color: NSColor(theme.semanticError), roughness: 0.4, isMetallic: false)
         buttonMaterials = (lit, lit)
 
+        if let data = try? Data(contentsOf: Self.gearDirectory.appendingPathComponent("desk_layout.json")),
+            let loaded = try? DeskLayout.decode(data)
+        {
+            layout = loaded
+        }
+        let catalog = Self.catalog()
+        placedGears = layout.gear.compactMap { entry in
+            catalog[entry.id].map { PlacedGear(blueprint: $0, origin: entry.center) }
+        }
+
         // 机の面 — Blender で仕上げた机（接地の暗がり入り）があればそれ
         if let desk = try? await Entity(contentsOf: Self.gearDirectory.appendingPathComponent("desk.usdz")) {
             root.addChild(desk)
         } else {
+            let size = layout.deskSize
             let desk = ModelEntity(
-                mesh: .generateBox(width: 0.9, height: 0.01, depth: 0.42, cornerRadius: 0.004),
+                mesh: .generateBox(
+                    width: Float(size.width) / 1000, height: 0.01, depth: Float(size.height) / 1000, cornerRadius: 0.004),
                 materials: [SimpleMaterial(color: NSColor(theme.surfaceBgSubtle), roughness: 0.9, isMetallic: false)])
-            desk.position = [0, -0.005, 0.04]
+            desk.position = [Float(layout.deskCenter.x) / 1000, -0.005, Float(layout.deskCenter.y) / 1000]
             root.addChild(desk)
         }
 
@@ -198,6 +236,7 @@ final class Desk3DScene {
             light.components.set(
                 ImageBasedLightComponent(source: .single(environment), intensityExponent: Self.exposure))
             root.addChild(light)
+            self.light = light
             Self.receive(light, in: root)
         } else {
             let sun = DirectionalLight()
@@ -206,13 +245,13 @@ final class Desk3DScene {
             root.addChild(sun)
         }
         let camera = PerspectiveCamera()
-        camera.camera.fieldOfViewInDegrees = 40
-        camera.look(at: [0, 0.01, 0.045], from: [0, 0.33, 0.37], relativeTo: nil)
+        camera.camera.fieldOfViewInDegrees = layout.fieldOfView
+        camera.look(at: layout.cameraAt, from: layout.cameraFrom, relativeTo: nil)
         root.addChild(camera)
         return root
     }
 
-    /// Blender から来る資産の置き場（`Gear/nanokontrol.py` / `Gear/look.py` が書く）
+    /// Blender から来る資産の置き場（`Gear/*.py` が書く）
     static let gearDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/ladyland/gear")
 
@@ -228,7 +267,7 @@ final class Desk3DScene {
         return try? await EnvironmentResource(equirectangular: image)
     }
 
-    /// 机の上のものすべてを環境光で照らす（後から足す部品の板も含め、組み立ての最後に一度）
+    /// 机の上のものすべてを環境光で照らす（後から作る帯も、作ったときに通す）
     static func receive(_ light: Entity, in root: Entity) {
         func walk(_ entity: Entity) {
             entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: light))
@@ -237,18 +276,19 @@ final class Desk3DScene {
         walk(root)
     }
 
+    private static func key(_ gear: String, _ part: String) -> String { "\(gear)/\(part)" }
+
     /// 機材 1 台 — 清書した USDZ があればそれ、無ければ下書きから組む
     private func gearEntity(_ blueprint: GearBlueprint, theme: CreoTheme) async -> Entity {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/ladyland/gear/\(blueprint.id).usdz")
+        let url = Self.gearDirectory.appendingPathComponent("\(blueprint.id).usdz")
         if FileManager.default.fileExists(atPath: url.path),
             let loaded = try? await Entity(contentsOf: url)
         {
             loaded.name = blueprint.id
-            for part in blueprint.parts {
+            for part in blueprint.parts where part.kind == .fader || part.kind == .button {
                 if let found = loaded.findEntity(named: part.name) {
-                    parts[part.name] = found
-                    partHome[part.name] = found.position
+                    parts[Self.key(blueprint.id, part.name)] = found
+                    partHome[Self.key(blueprint.id, part.name)] = found.position
                 }
             }
             return loaded
@@ -298,86 +338,88 @@ final class Desk3DScene {
                     mesh: .generateCylinder(height: mm(part.size.y), radius: mm(part.size.x) / 2),
                     materials: [cap])
                 entity.position = center + [0, mm(part.size.y) / 2, 0]
-            case .button:
+            case .button, .pad, .key, .other:
                 entity = ModelEntity(
                     mesh: .generateBox(
                         width: mm(part.size.x), height: mm(part.size.y), depth: mm(part.size.z),
                         cornerRadius: 0.0008),
-                    materials: [button])
+                    materials: [part.kind == .key ? cap : button])
                 entity.position = center + [0, mm(part.size.y) / 2, 0]
             }
             entity.name = part.name
             gear.addChild(entity)
-            parts[part.name] = entity
-            partHome[part.name] = entity.position
+            parts[Self.key(blueprint.id, part.name)] = entity
+            partHome[Self.key(blueprint.id, part.name)] = entity.position
         }
         return gear
     }
 
-    /// 仮想の部品 — 半透明に光る板 + 名前。掴めるように当たりを持たせる
+    /// 部品の色の材質
+    private func glass(_ component: VirtualComponent, opacity: Float, glow: Float = 0.6) -> PhysicallyBasedMaterial {
+        let color: NSColor = NSColor(
+            component == .mixer ? (theme?.brandPrimary ?? .green) : (theme?.semanticInfo ?? .blue))
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: color)
+        material.emissiveColor = .init(color: color)
+        material.emissiveIntensity = glow
+        material.blending = .transparent(opacity: .init(floatLiteral: opacity))
+        return material
+    }
+
+    private func label(_ component: VirtualComponent, at: SIMD3<Float>) -> ModelEntity {
+        let text = ModelEntity(
+            mesh: .generateText(component.title, extrusionDepth: 0.0004, font: .systemFont(ofSize: 0.011)),
+            materials: [UnlitMaterial(color: .white)])
+        text.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+        text.position = at
+        return text
+    }
+
+    /// 仮想の部品 — 半透明に光る板 + 名前。掴めるように当たりを持たせる。帯は載った先ごとに作る
     private func componentEntity(_ component: VirtualComponent, theme: CreoTheme) -> Entity {
-        let color: NSColor = NSColor(component == .mixer ? theme.brandPrimary : theme.semanticInfo)
-        func glass(_ opacity: Float, glow: Float = 0.6) -> PhysicallyBasedMaterial {
-            var material = PhysicallyBasedMaterial()
-            material.baseColor = .init(tint: color)
-            material.emissiveColor = .init(color: color)
-            material.emissiveIntensity = glow
-            material.blending = .transparent(opacity: .init(floatLiteral: opacity))
-            return material
-        }
-        func label(_ at: SIMD3<Float>) -> ModelEntity {
-            let text = ModelEntity(
-                mesh: .generateText(component.title, extrusionDepth: 0.0004, font: .systemFont(ofSize: 0.011)),
-                materials: [UnlitMaterial(color: .white)])
-            text.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
-            text.position = at
-            return text
-        }
         let root = Entity()
         root.name = "virtual.\(component.rawValue)"
-
-        // 平たい板（置き場・掴み中）
         let size: SIMD3<Float> = component == .mixer ? [0.22, 0.004, 0.05] : [0.22, 0.004, 0.022]
-        let plate = ModelEntity(mesh: .generateBox(size: size, cornerRadius: 0.002), materials: [glass(0.45)])
+        let plate = ModelEntity(
+            mesh: .generateBox(size: size, cornerRadius: 0.002), materials: [glass(component, opacity: 0.45)])
         plate.components.set(CollisionComponent(shapes: [.generateBox(size: size + [0, 0.01, 0])]))
         plate.components.set(InputTargetComponent())
-        plate.addChild(label([-size.x / 2 + 0.004, size.y / 2 + 0.0005, size.z / 2 - 0.004]))
+        plate.addChild(label(component, at: [-size.x / 2 + 0.004, size.y / 2 + 0.0005, size.z / 2 - 0.004]))
         root.addChild(plate)
         flats[component] = plate
-
-        // 帯（載ったとき）— 契約に合うセクションの**機材ごと**包む。幅は機材の
-        // 外形いっぱい（mako 赤入れ 2026-10-04: 左端まで覆う矢印）
-        if let gear = placedGears.first(where: { g in g.blueprint.sections.contains { component.canDock(on: $0) } }),
-            let section = gear.blueprint.sections.first(where: { component.canDock(on: $0) }),
-            let bounds = gearBounds[gear.blueprint.id]
-        {
-            let rect = CGRect(
-                x: CGFloat(bounds.min.x * 1000), y: CGFloat(bounds.min.z * 1000),
-                width: CGFloat((bounds.max.x - bounds.min.x) * 1000),
-                height: CGFloat((bounds.max.z - bounds.min.z) * 1000))
-            let frames = Desk3DMath.sleeve(
-                section: rect, gearMinZ: bounds.min.z, gearMaxZ: bounds.max.z, top: bounds.max.y)
-            let wrap = Entity()
-            for (name, frame) in frames {
-                let piece = ModelEntity(
-                    mesh: .generateBox(size: frame.size, cornerRadius: 0.0005),
-                    // 上の面は薄く — 下の操作子が見えるように（同赤入れ「この面は背景薄く」）
-                    materials: [name == "top" ? glass(0.1, glow: 0.15) : glass(0.4)])
-                piece.position = frame.center
-                if name == "top" {
-                    // 掴むのは上の板（外すときは手前へ引き出す）
-                    piece.components.set(
-                        CollisionComponent(shapes: [.generateBox(size: frame.size + [0, 0.01, 0])]))
-                    piece.components.set(InputTargetComponent())
-                    piece.addChild(label([-frame.size.x / 2 + 0.004, frame.size.y / 2 + 0.0005, frame.size.z / 2 - 0.004]))
-                }
-                wrap.addChild(piece)
-            }
-            wrap.isEnabled = false
-            root.addChild(wrap)
-            wraps[component] = (wrap, section.id)
-        }
         return root
+    }
+
+    /// 載った先の機材を**機材ごと**包む帯（mako 赤入れ 2026-10-04: 左端まで覆う / 上の面は薄く）
+    private func wrapEntity(_ component: VirtualComponent, section: String) -> Entity? {
+        guard
+            let gear = placedGears.first(where: { g in g.blueprint.sections.contains { $0.id == section } }),
+            let bounds = gearBounds[gear.blueprint.id]
+        else { return nil }
+        let rect = CGRect(
+            x: CGFloat(bounds.min.x * 1000), y: CGFloat(bounds.min.z * 1000),
+            width: CGFloat((bounds.max.x - bounds.min.x) * 1000),
+            height: CGFloat((bounds.max.z - bounds.min.z) * 1000))
+        let frames = Desk3DMath.sleeve(
+            section: rect, gearMinZ: bounds.min.z, gearMaxZ: bounds.max.z, top: bounds.max.y)
+        let wrap = Entity()
+        for (name, frame) in frames {
+            let piece = ModelEntity(
+                mesh: .generateBox(size: frame.size, cornerRadius: 0.0005),
+                materials: [name == "top" ? glass(component, opacity: 0.1, glow: 0.15) : glass(component, opacity: 0.4)])
+            piece.position = frame.center
+            if name == "top" {
+                // 掴むのは上の板（外すときは置き場へ引き出す）
+                piece.components.set(CollisionComponent(shapes: [.generateBox(size: frame.size + [0, 0.01, 0])]))
+                piece.components.set(InputTargetComponent())
+                piece.addChild(label(component, at: [
+                    -frame.size.x / 2 + 0.004, frame.size.y / 2 + 0.0005, frame.size.z / 2 - 0.004,
+                ]))
+            }
+            wrap.addChild(piece)
+        }
+        if let light { Self.receive(light, in: wrap) }
+        return wrap
     }
 
     // MARK: - 毎フレーム
@@ -386,36 +428,46 @@ final class Desk3DScene {
     func tick(appState: AppState) {
         let docks = appState.windowPlacement.docks ?? [:]
         for (component, entity) in components {
-            let wrap = wraps[component]
-            let wrapped = dragging[component] == nil && wrap != nil
-                && docks[component.rawValue] == wrap?.section
-            wrap?.entity.isEnabled = wrapped
+            let docked = docks[component.rawValue]
+            // 載った先が変わったら帯を作り直す
+            if wraps[component]?.section != docked {
+                wraps[component]?.entity.removeFromParent()
+                wraps[component] = nil
+                if let docked, let wrap = wrapEntity(component, section: docked) {
+                    entity.addChild(wrap)
+                    wraps[component] = (wrap, docked)
+                }
+            }
+            let wrapped = dragging[component] == nil && wraps[component] != nil
+            wraps[component]?.entity.isEnabled = wrapped
             flats[component]?.isEnabled = !wrapped
             if let point = dragging[component] {
                 entity.position = point
             } else if wrapped {
                 entity.position = .zero  // 帯は机の座標で組んである
             } else {
-                entity.position = restingPosition(component, docks: docks)
+                entity.position = restingPosition(component)
             }
         }
 
         let bank = MixerModel.bankIndices(
             selected: appState.rack.selected, trackCount: appState.rack.slots.count)
         let mixerOnFaders = docks[VirtualComponent.mixer.rawValue] == "nanokontrol.faders"
+        let nano = placedGears.first { $0.blueprint.id == "nanokontrol" }?.blueprint
         for (i, n) in (1...8).enumerated() {
             let slot = bank.indices.contains(i) ? appState.rack.slots[bank[i]] : nil
             // フェーダー — Mixer が載っていればその Track の音量の位置（上 = 奥）
-            if let fader = parts["fader_\(n)"], let home = partHome["fader_\(n)"] {
+            let faderKey = Self.key("nanokontrol", "fader_\(n)")
+            if let fader = parts[faderKey], let home = partHome[faderKey] {
                 let gain = mixerOnFaders ? (slot?.gain ?? 0) : 0.5
                 // 机の「奥」（-z）を部品の親の座標へ直してから動かす
                 let back = fader.parent?.convert(direction: [0, 0, -1], from: nil) ?? [0, 0, -1]
                 // 可動幅は下書きの値（写真のトレースで 30 mm）
-                let travel = (placedGears.first?.blueprint.parts.first { $0.name == "fader_\(n)" }?.travel ?? 30) / 1000
+                let travel = (nano?.parts.first { $0.name == "fader_\(n)" }?.travel ?? 30) / 1000
                 fader.position = home + Desk3DMath.faderOffset(gain: gain, travel: travel, back: back)
             }
             // M — ミュート中は赤
-            if let mute = parts["m_\(n)"].flatMap(Self.model(of:)) {
+            if let mute = parts[Self.key("nanokontrol", "m_\(n)")].flatMap(Self.model(of:)) {
                 let lit = mixerOnFaders && (slot?.mute ?? false)
                 if muteNormal[n] == nil { muteNormal[n] = mute.model?.materials }
                 if lit, let red = buttonMaterials?.lit {
@@ -427,18 +479,11 @@ final class Desk3DScene {
         }
     }
 
-    /// 部品の置き場 — 載っていればそのセクションの真上、無ければ手前の置き場
-    private func restingPosition(_ component: VirtualComponent, docks: [String: String]) -> SIMD3<Float> {
-        if let id = docks[component.rawValue],
-            let gear = placedGears.first(where: { g in g.blueprint.sections.contains { $0.id == id } }),
-            let section = gear.blueprint.sections.first(where: { $0.id == id })
-        {
-            let rect = gear.blueprint.footprint(of: section)
-                .offsetBy(dx: gear.origin.x, dy: gear.origin.y)
-            return [Float(rect.midX) / 1000, Self.hoverY, Float(rect.midY) / 1000]
-        }
-        let tray: Float = component == .mixer ? -0.12 : 0.12
-        return [tray, 0.004, 0.115]
+    /// 部品の置き場（並びの tray。机の上に平らに置く）
+    private func restingPosition(_ component: VirtualComponent) -> SIMD3<Float> {
+        let point = layout.tray[component.rawValue]
+            ?? CGPoint(x: component == .mixer ? -120 : 120, y: 115)
+        return [Float(point.x) / 1000, 0.004, Float(point.y) / 1000]
     }
 
     // MARK: - ドラッグ

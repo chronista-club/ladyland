@@ -23,6 +23,8 @@ import numpy as np
 from mathutils import Euler, Vector
 
 OUT_DIR = os.path.expanduser("~/Library/Application Support/ladyland/gear")
+HERE = "/Users/makomac/repos/ladyland/ladyland/Gear"
+LAYOUT_FILE = os.path.join(HERE, "desk_layout.json")
 TEX_DIR = os.path.join(OUT_DIR, "textures")
 LOOK = "desk_look"
 GEAR = "nanoKONTROL2"
@@ -148,7 +150,25 @@ def color_texture(ob, rgb, ao, name, strength=1.0):
 # MARK: - 組み立て
 
 
-def build_look():
+def load_layout():
+    import json
+    with open(LAYOUT_FILE) as f:
+        return json.load(f)
+
+
+def place_gear(layout):
+    """机の上の並びどおりに機材の入れ物（root）を置く（アプリ (x, z) mm → Blender (x, -z) m）。
+    置いた機材の id を返す"""
+    placed = []
+    for g in layout["gear"]:
+        root = bpy.data.objects.get(g["id"])
+        if root:
+            root.location = (g["center"][0] / 1000, -g["center"][1] / 1000, 0)
+            placed.append(g["id"])
+    return placed
+
+
+def build_look(layout=None):
     if LOOK in bpy.data.collections:
         old = bpy.data.collections[LOOK]
         for o in list(old.objects):
@@ -157,20 +177,26 @@ def build_look():
     coll = bpy.data.collections.new(LOOK)
     bpy.context.scene.collection.children.link(coll)
 
-    # 机の面（アプリの机と同じ広さ 0.9 × 0.42 m、天面 z = 0）
+    # 机の面（並びの desk と同じ広さ、天面 z = 0）
     desk_mat = material("desk_surface", (0.055, 0.052, 0.05), 0.8)
-    desk = plane(coll, "desk", (0.9, 0.42), (0, -0.04, 0), (0, 0, 0), desk_mat)
+    if layout:
+        dw, dd = layout["desk"]["size"][0] / 1000, layout["desk"]["size"][1] / 1000
+        dc = (layout["desk"]["center"][0] / 1000, -layout["desk"]["center"][1] / 1000)
+    else:
+        dw, dd, dc = 0.9, 0.42, (0, -0.04)
+    desk = plane(coll, "desk", (dw, dd), (dc[0], dc[1], 0), (0, 0, 0), desk_mat)
 
-    # 光 — 発光する板（全周の撮影に写り込む = 環境光になる）
-    key = plane(coll, "softbox_key", (0.7, 0.45), (0.05, -0.25, 0.6), (0, 0, 0),
-                emission("softbox_key", (1.0, 0.95, 0.88), 9.0))
-    aim(key, (0, 0, 0))
-    rim = plane(coll, "softbox_rim", (0.9, 0.08), (0, 0.45, 0.28), (0, 0, 0),
+    # 光 — 発光する板（全周の撮影に写り込む = 環境光になる）。机の大きさに合わせて置く
+    k = max(dw / 0.9, 1.0)
+    key = plane(coll, "softbox_key", (0.7 * k, 0.45 * k), (dc[0] + 0.05 * k, dc[1] - 0.25 * k, 0.6 * k),
+                (0, 0, 0), emission("softbox_key", (1.0, 0.95, 0.88), 9.0))
+    aim(key, (dc[0], dc[1], 0))
+    rim = plane(coll, "softbox_rim", (0.9 * k, 0.08 * k), (dc[0], dc[1] + 0.45 * k, 0.28 * k), (0, 0, 0),
                 emission("softbox_rim", (0.78, 0.86, 1.0), 6.0))
-    aim(rim, (0, 0, 0.02))
-    fill = plane(coll, "softbox_fill", (0.4, 0.3), (-0.7, -0.4, 0.15), (0, 0, 0),
-                 emission("softbox_fill", (1.0, 0.92, 0.85), 1.2))
-    aim(fill, (0, 0, 0.02))
+    aim(rim, (dc[0], dc[1], 0.02))
+    fill = plane(coll, "softbox_fill", (0.4 * k, 0.3 * k), (dc[0] - 0.7 * k, dc[1] - 0.4 * k, 0.15 * k),
+                 (0, 0, 0), emission("softbox_fill", (1.0, 0.92, 0.85), 1.2))
+    aim(fill, (dc[0], dc[1], 0.02))
 
     # ワールド — ほぼ黒（スタジオの暗がり）
     world = bpy.context.scene.world or bpy.data.worlds.new("World")
@@ -182,21 +208,22 @@ def build_look():
     return coll, desk
 
 
-def render_environment(coll):
+def render_environment(coll, center=(0, 0)):
     """機材の位置から全周を撮る（機材は写さない）→ environment.exr"""
     scene = bpy.context.scene
     cam_data = bpy.data.cameras.new("env_probe")
     cam_data.type = "PANO"
     cam_data.panorama_type = "EQUIRECTANGULAR"
     cam = bpy.data.objects.new("env_probe", cam_data)
-    cam.location = (0, 0, 0.06)
+    cam.location = (center[0], center[1], 0.06)
     cam.rotation_euler = Euler((1.5708, 0, 0))  # 地平線を水平に
     coll.objects.link(cam)
 
-    gear = bpy.data.collections.get(GEAR)
-    hide_before = gear.hide_render if gear else None
-    if gear:
-        gear.hide_render = True
+    # 機材は写さない（光だけを撮る）— 机の上の全機材のコレクション
+    gears = [c for c in scene.collection.children if c.name != LOOK and not c.hide_render]
+    hide_before = {c.name: c.hide_render for c in gears}
+    for c in gears:
+        c.hide_render = True
 
     r = scene.render
     scene.camera = cam
@@ -207,8 +234,8 @@ def render_environment(coll):
     scene.cycles.samples = 64
     bpy.ops.render.render(write_still=True)
 
-    if gear:
-        gear.hide_render = hide_before
+    for c in gears:
+        c.hide_render = hide_before[c.name]
     bpy.data.objects.remove(cam, do_unlink=True)
 
 
@@ -235,9 +262,12 @@ def main():
         depth=r.image_settings.color_depth, samples=scene.cycles.samples,
         sel=[o.name for o in bpy.context.selected_objects],
         active=bpy.context.view_layer.objects.active)
+    layout = load_layout() if os.path.exists(LAYOUT_FILE) else None
+    placed = place_gear(layout) if layout else []
+    gear_colls = {o.users_collection[0].name for o in bpy.data.objects if o.name in placed or o.name == "nanokontrol"}
     # ⚠️ 開いているシーンの他のもの（既定の立方体やライト）が撮影と焼き込みに
     # 入らないよう、作業中だけレンダーから外す（最後に戻す）
-    others = [c for c in scene.collection.children if c.name not in (GEAR, LOOK)]
+    others = [c for c in scene.collection.children if c.name not in gear_colls | {GEAR, LOOK}]
     hidden_before = {c.name: c.hide_render for c in others}
     loose = [o for o in scene.collection.objects]
     loose_before = {o.name: o.hide_render for o in loose}
@@ -247,11 +277,11 @@ def main():
         o.hide_render = True
     try:
         r.engine = "CYCLES"
-        coll, desk = build_look()
+        coll, desk = build_look(layout)
 
         # AO — 机の面（接地の暗がり）と筐体の隙間
         box_uv(desk.data)
-        desk_ao = bake_ao(desk, 1024)
+        desk_ao = bake_ao(desk, 2048 if layout else 1024)
         color_texture(desk, (0.055, 0.052, 0.05), desk_ao, "desk_color")
         body = bpy.data.objects.get("body")
         if body:
@@ -260,14 +290,22 @@ def main():
             # 黒い筐体は暗がりが見えにくい — 色を少しだけ持ち上げてから掛ける
             color_texture(body, (0.03, 0.03, 0.033), body_ao, "body_color")
 
-        render_environment(coll)
+        center = ((layout["desk"]["center"][0] / 1000, -layout["desk"]["center"][1] / 1000) if layout else (0, 0))
+        render_environment(coll, center)
 
         # 書き出し — 机と機材は別の USDZ（机は動かない、機材は部品を動かす）
         export_usdz([desk], os.path.join(OUT_DIR, "desk.usdz"), desk)
         gear = bpy.data.collections.get(GEAR)
         if gear:
-            export_usdz(list(gear.objects), os.path.join(OUT_DIR, "nanokontrol.usdz"),
-                        bpy.data.objects["nanokontrol"])
+            # 機材の USDZ は原点で書く（並びの位置はアプリが置く）
+            nano_root = bpy.data.objects["nanokontrol"]
+            at = nano_root.location.copy()
+            nano_root.location = (0, 0, 0)
+            export_usdz(list(gear.objects), os.path.join(OUT_DIR, "nanokontrol.usdz"), nano_root)
+            nano_root.location = at
+        if layout:
+            import shutil
+            shutil.copy(LAYOUT_FILE, os.path.join(OUT_DIR, "desk_layout.json"))
     finally:
         for c in others:
             c.hide_render = hidden_before[c.name]

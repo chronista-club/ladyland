@@ -41,6 +41,14 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1g. **机に 7 台(2026-10-05、mako「3D の机に全部載せて」)**: 並びは `Gear/desk_layout.json`
+    (アプリと Blender の両方が読む。机の大きさ・各機材の中心・部品の置き場・カメラ)。
+    `gear_build.py` は USDZ と一緒に配置データ(JSON、鍵盤は展開済み)を書き出し、アプリは
+    `GearBlueprint.decode` で部品とセクションを読む(nanoKONTROL2 だけ Swift の下書き)。
+    部品は「機材 id / 部品名」で引く(knob_1 などは機材をまたいで重なる)。帯は載った先ごとに
+    作り直す。Track ノブは 8 本以上のノブ列ならどれにも載り、LPD8 のノブ列に載せる / 外すと
+    `lpd8KnobJack` も face / drums に切り替わる。MIDI の意味まで繋がっているのは nanoKONTROL2
+    (操作面)と LPD8 のノブ(刺し先)だけ — ほかは載せて形を見る段階
 1f. **見た目は Blender で決める(2026-10-04、方針「A + AO」)**: mako「見た目の雰囲気は、
     ここでしっかり落とし込む。各クライアントは微調整くらい」。`Gear/look.py` が
     ソフトボックス(発光する板)とワールドを組み、機材の位置から全周を Cycles で撮って

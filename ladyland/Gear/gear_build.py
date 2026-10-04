@@ -276,6 +276,9 @@ def export(spec, coll):
         if n in bpy.data.objects:
             bpy.data.objects[n].select_set(True)
     bpy.context.view_layer.objects.active = prev_active
+    # アプリが部品とセクションを読む配置データ（鍵盤は展開済み）も同じ場所へ
+    with open(os.path.join(OUT_DIR, f"{spec['id']}.json"), "w") as f:
+        json.dump(spec, f, ensure_ascii=False, indent=1)
     return path
 
 
