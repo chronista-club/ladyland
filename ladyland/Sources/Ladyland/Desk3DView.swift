@@ -96,6 +96,17 @@ final class Desk3DScene {
     private var partHome: [String: SIMD3<Float>] = [:]
     private var buttonMaterials: (normal: any RealityKit.Material, lit: any RealityKit.Material)?
     private var components: [VirtualComponent: Entity] = [:]
+    /// M ボタンの元の材質（清書した USDZ の材質に戻すため）
+    private var muteNormal: [Int: [any RealityKit.Material]] = [:]
+
+    /// 名前付き部品の「形」— USDZ では入れ物（Xform）の子に形（Mesh）が付く
+    static func model(of entity: Entity) -> ModelEntity? {
+        if let model = entity as? ModelEntity { return model }
+        for child in entity.children {
+            if let found = model(of: child) { return found }
+        }
+        return nil
+    }
     private var dragging: [VirtualComponent: SIMD3<Float>] = [:]
 
     // MARK: - 組み立て
@@ -103,6 +114,8 @@ final class Desk3DScene {
     func build(theme: CreoTheme) async -> Entity {
         root = Entity()
         root.name = "desk3d"
+        let lit = SimpleMaterial(color: NSColor(theme.semanticError), roughness: 0.4, isMetallic: false)
+        buttonMaterials = (lit, lit)
 
         // 机の面
         let desk = ModelEntity(
@@ -265,9 +278,14 @@ final class Desk3DScene {
                 fader.position = home + [0, 0, (0.5 - gain) * travel]
             }
             // M — ミュート中は赤
-            if let mute = parts["m_\(n)"] as? ModelEntity, let materials = buttonMaterials {
+            if let mute = parts["m_\(n)"].flatMap(Self.model(of:)) {
                 let lit = mixerOnFaders && (slot?.mute ?? false)
-                mute.model?.materials = [lit ? materials.lit : materials.normal]
+                if muteNormal[n] == nil { muteNormal[n] = mute.model?.materials }
+                if lit, let red = buttonMaterials?.lit {
+                    mute.model?.materials = [red]
+                } else if let normal = muteNormal[n] {
+                    mute.model?.materials = normal
+                }
             }
         }
     }

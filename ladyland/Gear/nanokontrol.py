@@ -1,0 +1,149 @@
+"""nanoKONTROL2 の模型を Blender で組み、USDZ に書き出す（2026-10-04）。
+
+アプリの 3D の机（`Desk3DView`）は
+`~/Library/Application Support/ladyland/gear/nanokontrol.usdz` があればそれを読み、
+**部品を名前で掴む**（`fader_1`〜`8` を音量の位置へ動かす、`m_1`〜`8` をミュートで赤く）。
+寸法と配置は `Sources/Ladyland/Gear3D.swift` の `GearBlueprint.nanoKontrol2` と同じ
+（外形は公称 320 × 83 mm、内部は写真からの目測）。清書するときも部品名は保つこと。
+
+使い方: Blender の Scripting タブで実行するか、Blender MCP の execute_blender_code に流す。
+「nanoKONTROL2」コレクションだけを作り直し、他のオブジェクトと選択には触らない。
+座標: アプリ (x, z) mm → Blender (x, -z)。書き出しは Y-up / 前 = -Z。
+"""
+
+import os
+
+import bmesh
+import bpy
+from mathutils import Vector
+
+MM = 0.001
+COLL = "nanoKONTROL2"
+TOP = 16.0  # 筐体の天面の高さ mm
+OUT = os.path.expanduser("~/Library/Application Support/ladyland/gear/nanokontrol.usdz")
+
+
+def material(name, rgb, rough=0.5, metal=0.0):
+    m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    m.use_nodes = True
+    # ⚠️ 節点名は UI の言語で訳される（日本語 UI では「プリンシプル BSDF」）— 種類で引く
+    bsdf = next(n for n in m.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Base Color"].default_value = (*rgb, 1)
+    bsdf.inputs["Roughness"].default_value = rough
+    bsdf.inputs["Metallic"].default_value = metal
+    m.diffuse_color = (*rgb, 1)
+    return m
+
+
+def build():
+    prev_sel = [o.name for o in bpy.context.selected_objects]
+    prev_active = bpy.context.view_layer.objects.active
+
+    if COLL in bpy.data.collections:
+        old = bpy.data.collections[COLL]
+        for o in list(old.objects):
+            bpy.data.objects.remove(o, do_unlink=True)
+        bpy.data.collections.remove(old)
+    coll = bpy.data.collections.new(COLL)
+    bpy.context.scene.collection.children.link(coll)
+
+    mats = {
+        "body": material("nk_body", (0.018, 0.018, 0.02), 0.45, 0.25),
+        "groove": material("nk_groove", (0.004, 0.004, 0.004), 0.9),
+        "cap": material("nk_cap", (0.03, 0.03, 0.032), 0.55),
+        "knob": material("nk_knob", (0.05, 0.05, 0.055), 0.5),
+        "button": material("nk_button", (0.09, 0.09, 0.095), 0.7),
+        "white": material("nk_white", (0.9, 0.9, 0.88), 0.4),
+    }
+
+    def finish(ob, mat, parent, loc_mm, bevel_mm, segments=3):
+        ob.data.materials.append(mat)
+        coll.objects.link(ob)
+        if parent:
+            ob.parent = parent
+        ob.location = Vector(loc_mm) * MM
+        if bevel_mm > 0:
+            b = ob.modifiers.new("bevel", "BEVEL")
+            b.width = bevel_mm * MM
+            b.segments = segments
+        return ob
+
+    def box(name, size_mm, loc_mm, mat, parent=None, bevel_mm=0.0):
+        me = bpy.data.meshes.new(name)
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0)
+        bmesh.ops.scale(bm, vec=Vector(size_mm) * MM, verts=bm.verts)
+        bm.to_mesh(me)
+        bm.free()
+        return finish(bpy.data.objects.new(name, me), mat, parent, loc_mm, bevel_mm)
+
+    def cylinder(name, radius_mm, depth_mm, loc_mm, mat, parent=None):
+        me = bpy.data.meshes.new(name)
+        bm = bmesh.new()
+        bmesh.ops.create_cone(
+            bm, cap_ends=True, segments=32, radius1=radius_mm * MM,
+            radius2=radius_mm * MM * 0.92, depth=depth_mm * MM)
+        bm.to_mesh(me)
+        bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        return finish(bpy.data.objects.new(name, me), mat, parent, loc_mm, 0.6, 2)
+
+    root = bpy.data.objects.new("nanokontrol", None)
+    root.empty_display_size = 0.05
+    coll.objects.link(root)
+
+    box("body", (320, 83, TOP), (0, 0, TOP / 2), mats["body"], root, bevel_mm=2.5)
+
+    transport = [
+        ("track_prev", -145, -30), ("track_next", -130, -30), ("cycle", -145, -14),
+        ("marker_set", -118, -14), ("marker_prev", -103, -14), ("marker_next", -88, -14),
+        ("rew", -145, 14), ("ff", -128, 14), ("stop", -111, 14), ("play", -94, 14), ("rec", -77, 14),
+    ]
+    for name, x, z in transport:
+        box(name, (11, 7, 3), (x, -z, TOP + 1.5), mats["button"], root, bevel_mm=0.8)
+
+    for i in range(8):
+        left = -57 + 27 * i
+        n = i + 1
+        knob = cylinder(f"knob_{n}", 6.0, 11.0, (left + 13.5, 30, TOP + 5.5), mats["knob"], root)
+        box(f"knob_{n}_mark", (1.0, 4.5, 0.3), (0, 2.6, 5.6), mats["white"], knob)
+        for row, z in (("s", -12), ("m", 2), ("r", 16)):
+            box(f"{row}_{n}", (8, 6, 3), (left + 6.5, -z, TOP + 1.5), mats["button"], root, bevel_mm=0.7)
+        box(f"fader_slot_{n}", (2.6, 42, 0.6), (left + 19, -6, TOP + 0.3), mats["groove"], root)
+        cap = box(f"fader_{n}", (8, 12, 9), (left + 19, -6, TOP + 4.5), mats["cap"], root, bevel_mm=1.2)
+        box(f"fader_{n}_line", (7.2, 1.0, 0.3), (0, 0, 4.6), mats["white"], cap)
+
+    for o in bpy.context.selected_objects:
+        o.select_set(False)
+    for name in prev_sel:
+        if name in bpy.data.objects:
+            bpy.data.objects[name].select_set(True)
+    bpy.context.view_layer.objects.active = prev_active
+    return coll
+
+
+def export(coll):
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    prev_sel = [o.name for o in bpy.context.selected_objects]
+    prev_active = bpy.context.view_layer.objects.active
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    for o in coll.objects:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = bpy.data.objects["nanokontrol"]
+    bpy.ops.wm.usd_export(
+        filepath=OUT, selected_objects_only=True, export_materials=True,
+        generate_preview_surface=True, export_animation=False,
+        convert_orientation=True, export_global_forward_selection="NEGATIVE_Z",
+        export_global_up_selection="Y", evaluation_mode="RENDER", root_prim_path="/root")
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    for name in prev_sel:
+        if name in bpy.data.objects:
+            bpy.data.objects[name].select_set(True)
+    bpy.context.view_layer.objects.active = prev_active
+
+
+if __name__ == "__main__":
+    export(build())

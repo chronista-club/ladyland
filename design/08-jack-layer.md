@@ -46,7 +46,10 @@ engine 層  64 スロット / drums / master
     `fader_1` 等)、`VirtualComponent.canDock`(Jack の契約)、`DockModel`(落とした点 →
     セクション、載せ替え)、`SurfaceMapping`(実機の CC → 載せた部品の操作)。
     載せ先は window.json の `docks`。清書は Blender → `~/Library/Application Support/
-    ladyland/gear/<id>.usdz` に置けば下書きの代わりに読む(部品は同じ名前で掴む)
+    ladyland/gear/<id>.usdz` に置けば下書きの代わりに読む(部品は同じ名前で掴む)。
+    nanoKONTROL2 の模型は `ladyland/Gear/nanokontrol.py`(Blender スクリプト。Blender
+    MCP からも流せる)で組んで書き出す。USDZ では部品名が入れ物(Xform)と形(Mesh)の
+    2 段になるので、材質を替えるときは子の形まで辿る(`Desk3DScene.model(of:)`)
 1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
     ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
     落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。
