@@ -45,8 +45,10 @@ struct GearSection: Equatable {
 struct GearBlueprint: Equatable {
     let id: String
     let title: String
-    /// 外形（幅 x, 高さ y, 奥行き z）mm
+    /// 外形（幅 x, 高さ y, 奥行き z）mm。高さはノブ込み
     let size: SIMD3<Float>
+    /// 筐体そのものの厚み mm（操作子はこの上に乗る）
+    var bodyHeight: Float = 16
     let parts: [GearPart]
     let sections: [GearSection]
 
@@ -71,10 +73,12 @@ struct GearBlueprint: Equatable {
         all.lazy.flatMap(\.sections).first { $0.id == id }
     }
 
-    /// KORG nanoKONTROL2。外形は公称 320 × 83 × 29 mm。**配置は KORG 公式の真上からの
-    /// 写真（1200 × 800）を画素で測ってトレースした**（2026-10-04、mako「web から画像
-    /// 持ってきて、寸分違わない感じで、トレース出来る？」）。筐体の外接（1142 × 290 px）を
-    /// 320 × 83 mm に合わせ、横 0.2802 / 縦 0.2862 mm/px で換算。赤く光るボタンは
+    /// KORG nanoKONTROL2。外形は**取扱説明書の仕様 325 × 83 × 30 mm**（W × D × H、
+    /// 高さはノブ込み。mako「pdf とかの方が参考になるかもね」）。**配置は KORG 公式の
+    /// 真上からの写真（1200 × 800）を画素で測ってトレースした**（2026-10-04、mako
+    /// 「web から画像持ってきて、寸分違わない感じで、トレース出来る？」）。筐体の外接
+    /// （1142 × 290 px）を 325 × 83 mm に合わせ、横 0.2846 / 縦 0.2862 mm/px で換算
+    /// （縦横ほぼ同じ比 = 写真のゆがみが小さい裏付け）。赤く光るボタンは
     /// 色で拾った中心、ノブ・フェーダー・楕円ボタンは 10 px 目盛りで読んだ値。
     /// 横の 3 行は S/M/R の行に揃える（mako「実物は３ラインで揃ってます」）。
     /// CC は実測（2026-10-01、Creo `mem_1CfaNw1FapMJStBsdwsVPA`）
@@ -82,10 +86,10 @@ struct GearBlueprint: Equatable {
         var parts: [GearPart] = []
         // 横 3 行（S / M / R の中心、z mm）と、左側の縦 5 列（x mm）
         let row: [Float] = [-4.3, 10.7, 25.9]
-        let col: [Float] = [-142.1, -126.7, -111.2, -95.7, -80.3]
+        let col: [Float] = [-144.3, -128.6, -113.0, -97.2, -81.5]
         // 左 — Track ◀▶ / CYCLE・Marker（細長い楕円）、◀◀ ▶▶ ■ ▶ ●（大きい角）
-        let pill = SIMD3<Float>(10.6, 3, 4.6)
-        let square = SIMD3<Float>(11.2, 3, 10.9)
+        let pill = SIMD3<Float>(10.8, 3, 4.6)
+        let square = SIMD3<Float>(11.4, 3, 10.9)
         let transport: [(String, Float, Float, SIMD3<Float>)] = [
             ("track_prev", col[0], row[0], pill), ("track_next", col[1], row[0], pill),
             ("cycle", col[0], row[1], pill), ("marker_set", col[2], row[1], pill),
@@ -97,23 +101,23 @@ struct GearBlueprint: Equatable {
         for (name, x, z, size) in transport {
             parts.append(GearPart(name: name, kind: .button, center: [x, z], size: size))
         }
-        // 右 — チャンネル 8 本。S/M/R の列の x（写真の中心）、フェーダーはその右 12.75 mm、
+        // 右 — チャンネル 8 本。S/M/R の列の x（写真の中心）、フェーダーはその右 12.95 mm、
         // ノブはフェーダーの真上（奥）
-        let strip: [Float] = [-60.2, -33.1, -6.2, 21.2, 48.1, 75.2, 102.3, 129.3]
+        let strip: [Float] = [-61.2, -33.6, -6.3, 21.5, 48.8, 76.4, 103.9, 131.3]
         for (i, sx) in strip.enumerated() {
             let n = i + 1
-            parts.append(GearPart(name: "knob_\(n)", kind: .knob, center: [sx + 13.3, -27.3], size: [12, 8, 12]))
+            parts.append(GearPart(name: "knob_\(n)", kind: .knob, center: [sx + 13.5, -27.3], size: [12, 13, 12]))
             for (name, z) in zip(["s", "m", "r"], row) {
-                parts.append(GearPart(name: "\(name)_\(n)", kind: .button, center: [sx, z], size: [8.7, 3, 8.9]))
+                parts.append(GearPart(name: "\(name)_\(n)", kind: .button, center: [sx, z], size: [8.8, 3, 8.9]))
             }
             parts.append(
                 GearPart(
-                    name: "fader_\(n)", kind: .fader, center: [sx + 12.75, row[1]], size: [8.4, 6, 22],
+                    name: "fader_\(n)", kind: .fader, center: [sx + 12.95, row[1]], size: [8.5, 9, 22],
                     travel: 30))
         }
         let ccs = { (base: Int) in (base..<(base + 8)).map { UInt8($0) } }
         return GearBlueprint(
-            id: "nanokontrol", title: "nanoKONTROL2", size: [320, 29, 83], parts: parts,
+            id: "nanokontrol", title: "nanoKONTROL2", size: [325, 30, 83], parts: parts,
             sections: [
                 GearSection(
                     id: "nanokontrol.faders", kind: .faders,

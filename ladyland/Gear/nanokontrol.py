@@ -4,7 +4,7 @@
 `~/Library/Application Support/ladyland/gear/nanokontrol.usdz` があればそれを読み、
 **部品を名前で掴む**（`fader_1`〜`8` を音量の位置へ動かす、`m_1`〜`8` をミュートで赤く）。
 寸法と配置は `Sources/Ladyland/Gear3D.swift` の `GearBlueprint.nanoKontrol2` と同じ
-（外形は公称 320 × 83 mm、内部は写真からの目測）。清書するときも部品名は保つこと。
+（外形は取扱説明書の 325 × 83 × 30 mm、配置は KORG 公式の真上の写真のトレース）。清書するときも部品名は保つこと。
 
 使い方: Blender の Scripting タブで実行するか、Blender MCP の execute_blender_code に流す。
 「nanoKONTROL2」コレクションだけを作り直し、他のオブジェクトと選択には触らない。
@@ -93,13 +93,13 @@ def build():
     root.empty_display_size = 0.05
     coll.objects.link(root)
 
-    box("body", (320, 83, TOP), (0, 0, TOP / 2), mats["body"], root, bevel_mm=2.5)
+    box("body", (325, 83, TOP), (0, 0, TOP / 2), mats["body"], root, bevel_mm=2.5)
 
     # 配置は KORG 公式の真上からの写真を画素で測ったトレース（Gear3D.swift と同じ値）。
     # 横 3 行 = S/M/R の行、左側の縦 5 列
     row = [-4.3, 10.7, 25.9]
-    col = [-142.1, -126.7, -111.2, -95.7, -80.3]
-    pill, square = (10.6, 4.6), (11.2, 10.9)
+    col = [-144.3, -128.6, -113.0, -97.2, -81.5]
+    pill, square = (10.8, 4.6), (11.4, 10.9)
     transport = [
         ("track_prev", col[0], row[0], pill), ("track_next", col[1], row[0], pill),
         ("cycle", col[0], row[1], pill), ("marker_set", col[2], row[1], pill),
@@ -112,18 +112,18 @@ def build():
         box(name, (w, d, 3), (x, -z, TOP + 1.5), mats["button"], root, bevel_mm=bevel)
 
     # 電源の LED（飾り — アプリは掴まない）
-    box("led", (6.2, 2.3, 0.4), (-147.8, 31.8, TOP + 0.2), mats["white"], root, bevel_mm=0.9)
+    box("led", (6.3, 2.3, 0.4), (-150.1, 31.8, TOP + 0.2), mats["white"], root, bevel_mm=0.9)
 
-    strip = [-60.2, -33.1, -6.2, 21.2, 48.1, 75.2, 102.3, 129.3]
+    strip = [-61.2, -33.6, -6.3, 21.5, 48.8, 76.4, 103.9, 131.3]
     for i, sx in enumerate(strip):
         n = i + 1
-        knob = cylinder(f"knob_{n}", 6.0, 11.0, (sx + 13.3, 27.3, TOP + 5.5), mats["knob"], root)
-        box(f"knob_{n}_mark", (1.0, 4.5, 0.3), (0, 2.6, 5.6), mats["white"], knob)
+        knob = cylinder(f"knob_{n}", 6.0, 13.0, (sx + 13.5, 27.3, TOP + 6.5), mats["knob"], root)
+        box(f"knob_{n}_mark", (1.0, 4.5, 0.3), (0, 2.6, 6.6), mats["white"], knob)
         for name, z in zip(("s", "m", "r"), row):
-            box(f"{name}_{n}", (8.7, 8.9, 3), (sx, -z, TOP + 1.5), mats["button"], root, bevel_mm=1.0)
-        fx = sx + 12.75
+            box(f"{name}_{n}", (8.8, 8.9, 3), (sx, -z, TOP + 1.5), mats["button"], root, bevel_mm=1.0)
+        fx = sx + 12.95
         box(f"fader_slot_{n}", (2.6, 38.9, 0.6), (fx, -row[1], TOP + 0.3), mats["groove"], root)
-        cap = box(f"fader_{n}", (8.4, 22, 9), (fx, -row[1], TOP + 4.5), mats["cap"], root, bevel_mm=1.2)
+        cap = box(f"fader_{n}", (8.5, 22, 9), (fx, -row[1], TOP + 4.5), mats["cap"], root, bevel_mm=1.2)
         for k in range(5):  # 滑り止めの溝（写真の横筋）
             box(f"fader_{n}_rib_{k}", (8.0, 0.6, 0.3), (0, -6 + 3 * k, 4.6), mats["groove"], cap)
         box(f"fader_{n}_line", (8.0, 1.0, 0.3), (0, 0, 4.65), mats["white"], cap)

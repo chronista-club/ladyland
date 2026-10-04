@@ -263,13 +263,13 @@ final class Desk3DScene {
         gear.name = blueprint.id
         let body = ModelEntity(
             mesh: .generateBox(
-                width: mm(blueprint.size.x), height: mm(blueprint.size.y), depth: mm(blueprint.size.z),
+                width: mm(blueprint.size.x), height: mm(blueprint.bodyHeight), depth: mm(blueprint.size.z),
                 cornerRadius: 0.002),
             materials: [SimpleMaterial(color: NSColor(white: 0.12, alpha: 1), roughness: 0.6, isMetallic: true)])
-        body.position = [0, mm(blueprint.size.y) / 2, 0]
+        body.position = [0, mm(blueprint.bodyHeight) / 2, 0]
         gear.addChild(body)
 
-        let top = mm(blueprint.size.y)
+        let top = mm(blueprint.bodyHeight)
         let dark = SimpleMaterial(color: NSColor(white: 0.05, alpha: 1), roughness: 0.8, isMetallic: false)
         let cap = SimpleMaterial(color: NSColor(white: 0.85, alpha: 1), roughness: 0.4, isMetallic: false)
         let button = SimpleMaterial(color: NSColor(white: 0.32, alpha: 1), roughness: 0.5, isMetallic: false)

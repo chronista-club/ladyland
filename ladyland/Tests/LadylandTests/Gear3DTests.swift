@@ -18,9 +18,9 @@ import simd
 struct GearBlueprintTests {
     let nano = GearBlueprint.nanoKontrol2
 
-    @Test("外形は公称寸法 320 × 83 × 29 mm")
+    @Test("外形は取扱説明書の仕様 325 × 83 × 30 mm（W × D × H。高さはノブ込み）")
     func size() {
-        #expect(nano.size == SIMD3<Float>(320, 29, 83))
+        #expect(nano.size == SIMD3<Float>(325, 30, 83))
     }
 
     @Test("可動部は名前付き — fader_1…8 / knob_1…8 / s・m・r_1…8")
