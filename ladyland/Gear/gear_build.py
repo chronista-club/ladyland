@@ -305,6 +305,11 @@ def compare(spec, photo, mm_per_px, body_center_px, out_render, out_overlay):
     hid = {c.name: c.hide_render for c in others}
     for c in others:
         c.hide_render = True
+    # 照明の発光板は真上のカメラに写り込むので、比較のあいだだけカメラから隠す（光は残る）
+    look = bpy.data.collections.get("desk_look")
+    emitters = [o for o in (look.objects if look else []) if o.name.startswith("softbox")]
+    for o in emitters:
+        o.visible_camera = False
     cam_data = bpy.data.cameras.new("compare_cam")
     cam_data.type = "ORTHO"
     cam_data.ortho_scale = W * sx * MM
@@ -325,6 +330,8 @@ def compare(spec, photo, mm_per_px, body_center_px, out_render, out_overlay):
         bpy.data.objects.remove(cam, do_unlink=True)
         for c in others:
             c.hide_render = hid[c.name]
+        for o in emitters:
+            o.visible_camera = True
         r.pixel_aspect_x = r.pixel_aspect_y = 1
         (scene.camera, r.engine, r.resolution_x, r.resolution_y, r.filepath,
          r.image_settings.file_format, scene.cycles.samples) = keep
