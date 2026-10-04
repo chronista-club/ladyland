@@ -235,6 +235,16 @@ def main():
         depth=r.image_settings.color_depth, samples=scene.cycles.samples,
         sel=[o.name for o in bpy.context.selected_objects],
         active=bpy.context.view_layer.objects.active)
+    # ⚠️ 開いているシーンの他のもの（既定の立方体やライト）が撮影と焼き込みに
+    # 入らないよう、作業中だけレンダーから外す（最後に戻す）
+    others = [c for c in scene.collection.children if c.name not in (GEAR, LOOK)]
+    hidden_before = {c.name: c.hide_render for c in others}
+    loose = [o for o in scene.collection.objects]
+    loose_before = {o.name: o.hide_render for o in loose}
+    for c in others:
+        c.hide_render = True
+    for o in loose:
+        o.hide_render = True
     try:
         r.engine = "CYCLES"
         coll, desk = build_look()
@@ -259,6 +269,11 @@ def main():
             export_usdz(list(gear.objects), os.path.join(OUT_DIR, "nanokontrol.usdz"),
                         bpy.data.objects["nanokontrol"])
     finally:
+        for c in others:
+            c.hide_render = hidden_before[c.name]
+        for o in loose:
+            if o.name in bpy.data.objects:
+                o.hide_render = loose_before[o.name]
         scene.camera = keep["camera"]
         r.engine = keep["engine"]
         r.resolution_x, r.resolution_y, r.resolution_percentage = keep["rx"], keep["ry"], keep["rp"]
