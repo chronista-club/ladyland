@@ -41,6 +41,15 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1f. **見た目は Blender で決める(2026-10-04、方針「A + AO」)**: mako「見た目の雰囲気は、
+    ここでしっかり落とし込む。各クライアントは微調整くらい」。`Gear/look.py` が
+    ソフトボックス(発光する板)とワールドを組み、機材の位置から全周を Cycles で撮って
+    `environment.exr` に、机の接地の暗がりと筐体の隙間を AO で焼いて色に合成し
+    `desk.usdz` / `nanokontrol.usdz` に書く。アプリは環境マップで照らし
+    (`ImageBasedLightComponent`)、足すのは `exposure` の微調整だけ。
+    ⚠️ RealityKit は USD の中のライトを読まない(光は画像で運ぶ)/ 焼いた色は sRGB で書く
+    (線形のままだと約 1/10 の明るさ)/ USD の Preview Surface は Base Color に画像が
+    直結した形しか運ばない(Mix 節点は落ちる)ので、色 × AO は画像に合成してから繋ぐ
 1e. **3D の机(2026-10-04)**: RealityKit(`Desk3DView`、macOS 15 へ引き上げ)。
     `Gear3D.swift`(純関数)— `GearBlueprint`(実寸 mm の下書き。可動部は名前付き部品
     `fader_1` 等)、`VirtualComponent.canDock`(Jack の契約)、`DockModel`(落とした点 →

@@ -15,6 +15,7 @@
 //! 単位はメートル（下書きの mm ÷ 1000）。机の面が y = 0、奥が −z
 
 import CreoUI
+import ImageIO
 import RealityKit
 import SwiftUI
 
@@ -161,12 +162,16 @@ final class Desk3DScene {
         let lit = SimpleMaterial(color: NSColor(theme.semanticError), roughness: 0.4, isMetallic: false)
         buttonMaterials = (lit, lit)
 
-        // 机の面
-        let desk = ModelEntity(
-            mesh: .generateBox(width: 0.9, height: 0.01, depth: 0.42, cornerRadius: 0.004),
-            materials: [SimpleMaterial(color: NSColor(theme.surfaceBgSubtle), roughness: 0.9, isMetallic: false)])
-        desk.position = [0, -0.005, 0.04]
-        root.addChild(desk)
+        // 机の面 — Blender で仕上げた机（接地の暗がり入り）があればそれ
+        if let desk = try? await Entity(contentsOf: Self.gearDirectory.appendingPathComponent("desk.usdz")) {
+            root.addChild(desk)
+        } else {
+            let desk = ModelEntity(
+                mesh: .generateBox(width: 0.9, height: 0.01, depth: 0.42, cornerRadius: 0.004),
+                materials: [SimpleMaterial(color: NSColor(theme.surfaceBgSubtle), roughness: 0.9, isMetallic: false)])
+            desk.position = [0, -0.005, 0.04]
+            root.addChild(desk)
+        }
 
         // 機材
         for gear in placedGears {
@@ -183,16 +188,53 @@ final class Desk3DScene {
             root.addChild(entity)
         }
 
-        // 光とカメラ（斜め上から見下ろす）
-        let sun = DirectionalLight()
-        sun.light.intensity = 2500
-        sun.look(at: [0, 0, 0], from: [0.3, 0.8, 0.5], relativeTo: nil)
-        root.addChild(sun)
+        // 光 — **見た目は Blender で決める**（mako 2026-10-04「見た目の雰囲気は、ここで
+        // しっかり落とし込む。各クライアントは微調整くらい」）。Blender が書いた
+        // 環境マップで照らし、こちらで足すのは明るさの微調整（`exposure`）だけ。
+        // 無ければ仮のライト
+        if let environment = await Self.loadEnvironment() {
+            let light = Entity()
+            light.name = "environment"
+            light.components.set(
+                ImageBasedLightComponent(source: .single(environment), intensityExponent: Self.exposure))
+            root.addChild(light)
+            Self.receive(light, in: root)
+        } else {
+            let sun = DirectionalLight()
+            sun.light.intensity = 2500
+            sun.look(at: [0, 0, 0], from: [0.3, 0.8, 0.5], relativeTo: nil)
+            root.addChild(sun)
+        }
         let camera = PerspectiveCamera()
         camera.camera.fieldOfViewInDegrees = 40
         camera.look(at: [0, 0.01, 0.045], from: [0, 0.33, 0.37], relativeTo: nil)
         root.addChild(camera)
         return root
+    }
+
+    /// Blender から来る資産の置き場（`Gear/nanokontrol.py` / `Gear/look.py` が書く）
+    static let gearDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/ladyland/gear")
+
+    /// 環境マップの明るさの微調整（2 の冪。0 = Blender のまま）
+    static let exposure: Float = 0
+
+    /// Blender が撮った全周（`environment.exr`）→ 環境光
+    static func loadEnvironment() async -> EnvironmentResource? {
+        let url = gearDirectory.appendingPathComponent("environment.exr")
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { return nil }
+        return try? await EnvironmentResource(equirectangular: image)
+    }
+
+    /// 机の上のものすべてを環境光で照らす（後から足す部品の板も含め、組み立ての最後に一度）
+    static func receive(_ light: Entity, in root: Entity) {
+        func walk(_ entity: Entity) {
+            entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: light))
+            entity.children.forEach(walk)
+        }
+        walk(root)
     }
 
     /// 機材 1 台 — 清書した USDZ があればそれ、無ければ下書きから組む
