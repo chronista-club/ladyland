@@ -410,7 +410,9 @@ final class Desk3DScene {
                 let gain = mixerOnFaders ? (slot?.gain ?? 0) : 0.5
                 // 机の「奥」（-z）を部品の親の座標へ直してから動かす
                 let back = fader.parent?.convert(direction: [0, 0, -1], from: nil) ?? [0, 0, -1]
-                fader.position = home + Desk3DMath.faderOffset(gain: gain, travel: 0.032, back: back)
+                // 可動幅は下書きの値（写真のトレースで 30 mm）
+                let travel = (placedGears.first?.blueprint.parts.first { $0.name == "fader_\(n)" }?.travel ?? 30) / 1000
+                fader.position = home + Desk3DMath.faderOffset(gain: gain, travel: travel, back: back)
             }
             // M — ミュート中は赤
             if let mute = parts["m_\(n)"].flatMap(Self.model(of:)) {

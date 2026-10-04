@@ -256,3 +256,17 @@ struct TransportLayoutTests {
         #expect(x("marker_next") == columns[4])
     }
 }
+
+@Suite("3D の机 — nanoKONTROL2 のボタンの横の線")
+struct ButtonRowsTests {
+    let nano = GearBlueprint.nanoKontrol2
+    private func z(_ name: String) -> Float? { nano.parts.first { $0.name == name }?.center.y }
+
+    @Test("左右で 3 本の横の線に揃う — Track = S、CYCLE / Marker = M、トランスポート = R（mako 2026-10-04）")
+    func rows() {
+        let s = z("s_1"), m = z("m_1"), r = z("r_1")
+        for name in ["track_prev", "track_next"] { #expect(z(name) == s, "\(name)") }
+        for name in ["cycle", "marker_set", "marker_prev", "marker_next"] { #expect(z(name) == m, "\(name)") }
+        for name in ["rew", "ff", "stop", "play", "rec"] { #expect(z(name) == r, "\(name)") }
+    }
+}

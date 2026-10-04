@@ -71,42 +71,45 @@ struct GearBlueprint: Equatable {
         all.lazy.flatMap(\.sections).first { $0.id == id }
     }
 
-    /// KORG nanoKONTROL2。外形は公称 320 × 83 × 29 mm。**内部の配置は写真からの
-    /// 目測の下書き** — Blender で清書したら、その USDZ を正にする。
+    /// KORG nanoKONTROL2。外形は公称 320 × 83 × 29 mm。**配置は KORG 公式の真上からの
+    /// 写真（1200 × 800）を画素で測ってトレースした**（2026-10-04、mako「web から画像
+    /// 持ってきて、寸分違わない感じで、トレース出来る？」）。筐体の外接（1142 × 290 px）を
+    /// 320 × 83 mm に合わせ、横 0.2802 / 縦 0.2862 mm/px で換算。赤く光るボタンは
+    /// 色で拾った中心、ノブ・フェーダー・楕円ボタンは 10 px 目盛りで読んだ値。
+    /// 横の 3 行は S/M/R の行に揃える（mako「実物は３ラインで揃ってます」）。
     /// CC は実測（2026-10-01、Creo `mem_1CfaNw1FapMJStBsdwsVPA`）
     static let nanoKontrol2: GearBlueprint = {
         var parts: [GearPart] = []
-        // 左 — トランスポート側（Track ◀▶ / CYCLE・Marker / ◀◀ ▶▶ ■ ▶ ●）
-        let button = SIMD3<Float>(11, 3, 7)
-        // **縦 5 列に揃う**（mako 2026-10-04「ボタンの配置が縦５列ラインに揃ってる」）。
-        // 列は下の段（◀◀ ▶▶ ■ ▶ ●）が基準: Track ◀▶ = 1・2 列、CYCLE = 1 列、
-        // Marker SET ◀ ▶ = 3・4・5 列
-        let col: [Float] = [-145, -128, -111, -94, -77]
-        let transport: [(String, Float, Float)] = [
-            ("track_prev", col[0], -30), ("track_next", col[1], -30),
-            ("cycle", col[0], -14), ("marker_set", col[2], -14),
-            ("marker_prev", col[3], -14), ("marker_next", col[4], -14),
-            ("rew", col[0], 14), ("ff", col[1], 14), ("stop", col[2], 14),
-            ("play", col[3], 14), ("rec", col[4], 14),
+        // 横 3 行（S / M / R の中心、z mm）と、左側の縦 5 列（x mm）
+        let row: [Float] = [-4.3, 10.7, 25.9]
+        let col: [Float] = [-142.1, -126.7, -111.2, -95.7, -80.3]
+        // 左 — Track ◀▶ / CYCLE・Marker（細長い楕円）、◀◀ ▶▶ ■ ▶ ●（大きい角）
+        let pill = SIMD3<Float>(10.6, 3, 4.6)
+        let square = SIMD3<Float>(11.2, 3, 10.9)
+        let transport: [(String, Float, Float, SIMD3<Float>)] = [
+            ("track_prev", col[0], row[0], pill), ("track_next", col[1], row[0], pill),
+            ("cycle", col[0], row[1], pill), ("marker_set", col[2], row[1], pill),
+            ("marker_prev", col[3], row[1], pill), ("marker_next", col[4], row[1], pill),
+            ("rew", col[0], row[2], square), ("ff", col[1], row[2], square),
+            ("stop", col[2], row[2], square), ("play", col[3], row[2], square),
+            ("rec", col[4], row[2], square),
         ]
-        for (name, x, z) in transport {
-            parts.append(GearPart(name: name, kind: .button, center: [x, z], size: button))
+        for (name, x, z, size) in transport {
+            parts.append(GearPart(name: name, kind: .button, center: [x, z], size: size))
         }
-        // 右 — チャンネル 8 本（奥にノブ、左列に S/M/R、右列にフェーダー）
-        let pitch: Float = 27
-        for i in 0..<8 {
-            let left = -57 + pitch * Float(i)
+        // 右 — チャンネル 8 本。S/M/R の列の x（写真の中心）、フェーダーはその右 12.75 mm、
+        // ノブはフェーダーの真上（奥）
+        let strip: [Float] = [-60.2, -33.1, -6.2, 21.2, 48.1, 75.2, 102.3, 129.3]
+        for (i, sx) in strip.enumerated() {
             let n = i + 1
-            parts.append(
-                GearPart(name: "knob_\(n)", kind: .knob, center: [left + 13.5, -30], size: [12, 8, 12]))
-            for (row, z) in [("s", Float(-12)), ("m", 2), ("r", 16)] {
-                parts.append(
-                    GearPart(name: "\(row)_\(n)", kind: .button, center: [left + 6.5, z], size: [8, 3, 6]))
+            parts.append(GearPart(name: "knob_\(n)", kind: .knob, center: [sx + 13.3, -27.3], size: [12, 8, 12]))
+            for (name, z) in zip(["s", "m", "r"], row) {
+                parts.append(GearPart(name: "\(name)_\(n)", kind: .button, center: [sx, z], size: [8.7, 3, 8.9]))
             }
             parts.append(
                 GearPart(
-                    name: "fader_\(n)", kind: .fader, center: [left + 19, 6], size: [8, 6, 10],
-                    travel: 32))
+                    name: "fader_\(n)", kind: .fader, center: [sx + 12.75, row[1]], size: [8.4, 6, 22],
+                    travel: 30))
         }
         let ccs = { (base: Int) in (base..<(base + 8)).map { UInt8($0) } }
         return GearBlueprint(
