@@ -95,10 +95,12 @@ def build():
 
     box("body", (320, 83, TOP), (0, 0, TOP / 2), mats["body"], root, bevel_mm=2.5)
 
+    # 縦 5 列に揃う（下の段が基準）— Gear3D.swift と同じ
+    col = [-145, -128, -111, -94, -77]
     transport = [
-        ("track_prev", -145, -30), ("track_next", -130, -30), ("cycle", -145, -14),
-        ("marker_set", -118, -14), ("marker_prev", -103, -14), ("marker_next", -88, -14),
-        ("rew", -145, 14), ("ff", -128, 14), ("stop", -111, 14), ("play", -94, 14), ("rec", -77, 14),
+        ("track_prev", col[0], -30), ("track_next", col[1], -30), ("cycle", col[0], -14),
+        ("marker_set", col[2], -14), ("marker_prev", col[3], -14), ("marker_next", col[4], -14),
+        ("rew", col[0], 14), ("ff", col[1], 14), ("stop", col[2], 14), ("play", col[3], 14), ("rec", col[4], 14),
     ]
     for name, x, z in transport:
         box(name, (11, 7, 3), (x, -z, TOP + 1.5), mats["button"], root, bevel_mm=0.8)

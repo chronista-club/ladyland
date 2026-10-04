@@ -238,3 +238,21 @@ struct SleeveTests {
         #expect(near(frames["left"]?.size, [0.002, 0.035, 0.09]))
     }
 }
+
+@Suite("3D の机 — nanoKONTROL2 の左側のボタン")
+struct TransportLayoutTests {
+    let nano = GearBlueprint.nanoKontrol2
+    private func x(_ name: String) -> Float? { nano.parts.first { $0.name == name }?.center.x }
+
+    @Test("縦 5 列に揃う — 下の段（◀◀ ▶▶ ■ ▶ ●）が列の基準（mako 2026-10-04）")
+    func columns() {
+        let columns = ["rew", "ff", "stop", "play", "rec"].compactMap(x)
+        #expect(columns.count == 5)
+        #expect(x("track_prev") == columns[0])
+        #expect(x("track_next") == columns[1])
+        #expect(x("cycle") == columns[0])
+        #expect(x("marker_set") == columns[2])
+        #expect(x("marker_prev") == columns[3])
+        #expect(x("marker_next") == columns[4])
+    }
+}

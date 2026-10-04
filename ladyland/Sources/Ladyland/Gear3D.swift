@@ -78,12 +78,16 @@ struct GearBlueprint: Equatable {
         var parts: [GearPart] = []
         // 左 — トランスポート側（Track ◀▶ / CYCLE・Marker / ◀◀ ▶▶ ■ ▶ ●）
         let button = SIMD3<Float>(11, 3, 7)
+        // **縦 5 列に揃う**（mako 2026-10-04「ボタンの配置が縦５列ラインに揃ってる」）。
+        // 列は下の段（◀◀ ▶▶ ■ ▶ ●）が基準: Track ◀▶ = 1・2 列、CYCLE = 1 列、
+        // Marker SET ◀ ▶ = 3・4・5 列
+        let col: [Float] = [-145, -128, -111, -94, -77]
         let transport: [(String, Float, Float)] = [
-            ("track_prev", -145, -30), ("track_next", -130, -30),
-            ("cycle", -145, -14), ("marker_set", -118, -14),
-            ("marker_prev", -103, -14), ("marker_next", -88, -14),
-            ("rew", -145, 14), ("ff", -128, 14), ("stop", -111, 14),
-            ("play", -94, 14), ("rec", -77, 14),
+            ("track_prev", col[0], -30), ("track_next", col[1], -30),
+            ("cycle", col[0], -14), ("marker_set", col[2], -14),
+            ("marker_prev", col[3], -14), ("marker_next", col[4], -14),
+            ("rew", col[0], 14), ("ff", col[1], 14), ("stop", col[2], 14),
+            ("play", col[3], 14), ("rec", col[4], 14),
         ]
         for (name, x, z) in transport {
             parts.append(GearPart(name: name, kind: .button, center: [x, z], size: button))
