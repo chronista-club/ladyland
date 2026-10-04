@@ -26,6 +26,9 @@ final class AppState: ObservableObject {
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
     /// 固定先が選択と割れても正しい席の割当を見る — `drumFaceKnobs` と同じ作法）
     let secondFaceKnobs = FaceKnobController()
+    /// 操作面（nanoKONTROL2）のフェーダー → 音量のピックアップ（席ごと。
+    /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
+    private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
     let ledBus = LedBus()
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
@@ -916,6 +919,12 @@ final class AppState: ObservableObject {
             }
         }
 
+        // 操作面（nanoKONTROL2）→ 机で載せた部品の操作（mako 2026-10-04
+        // 「ナノコントロール 2 の上にミキサーを置く」）
+        router.setSurfaceHandler { [weak self] cc, value in
+            DispatchQueue.main.async { self?.handleSurface(cc: cc, value: value) }
+        }
+
         // MIDI ルーティングトレース → Debug ウィンドウ（design/06 §8 追補）。
         // RT スレッドで MidiRoute 値型が発行され、ここ（main）で名前を足して
         // 整形する。連続ストリームは collapse key で 1 行に畳まれる
@@ -1366,6 +1375,31 @@ final class AppState: ObservableObject {
         slot.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed
         scheduleAutosave()  // [常時保存 27] トラック名
         scheduleRotoLiveBurn()  // MIXER 冊の席名・ミュートボタン名が変わる
+    }
+
+    /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
+    func handleSurface(cc: UInt8, value: UInt8) {
+        let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
+        guard
+            let action = SurfaceMapping.action(
+                cc: cc, value: value, docks: windowPlacement.docks ?? [:], bank: bank,
+                page: activeKnobPage ?? rotoPage)
+        else { return }
+        switch action {
+        case .gain(let index, let gain):
+            guard rack.slots.indices.contains(index) else { return }
+            let slot = rack.slots[index]
+            // ピックアップ — 実機のフェーダーが今の音量を通るまで掴まない
+            guard surfaceGainPickup.accept(knob: index, value: Double(gain), target: Double(slot.gain))
+            else { return }
+            setGain(slot, to: gain)
+        case .toggleMute(let index):
+            guard rack.slots.indices.contains(index) else { return }
+            toggleMute(rack.slots[index])
+        case .trackKnob(let seat, let value):
+            faceKnobs.handle(knob: seat, value127: Int(value))
+            scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
+        }
     }
 
     /// トラックの gain を直接設定する（Track 面のスライダー）

@@ -41,6 +41,12 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1e. **3D の机(2026-10-04)**: RealityKit(`Desk3DView`、macOS 15 へ引き上げ)。
+    `Gear3D.swift`(純関数)— `GearBlueprint`(実寸 mm の下書き。可動部は名前付き部品
+    `fader_1` 等)、`VirtualComponent.canDock`(Jack の契約)、`DockModel`(落とした点 →
+    セクション、載せ替え)、`SurfaceMapping`(実機の CC → 載せた部品の操作)。
+    載せ先は window.json の `docks`。清書は Blender → `~/Library/Application Support/
+    ladyland/gear/<id>.usdz` に置けば下書きの代わりに読む(部品は同じ名前で掴む)
 1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
     ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
     落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。

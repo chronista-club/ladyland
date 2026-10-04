@@ -454,6 +454,28 @@ final class MIDIRouter: @unchecked Sendable {
         target?.sendMIDIEvent(status, data1: data1, data2: data2)
     }
 
+    // MARK: - 操作面（nanoKONTROL2）経路
+
+    /// 操作面の CC の受け口（main へホップするのは受け手の仕事）
+    private var surfaceHandler: (@Sendable (UInt8, UInt8) -> Void)?
+
+    func setSurfaceHandler(_ handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        surfaceHandler = handler
+    }
+
+    /// 操作面の受信。**CC だけを受け、楽器へは何も流さない** — 意味は机で
+    /// 載せた部品が決める（`SurfaceMapping`）
+    func routeSurface(_ status: UInt8, _ data1: UInt8, _ data2: UInt8) {
+        guard status & 0xF0 == 0xB0 else { return }
+        lock.lock()
+        let handler = surfaceHandler
+        let trace = traceHandler
+        lock.unlock()
+        trace?(.surface(cc: data1, value: data2))
+        handler?(data1, data2)
+    }
+
     /// キープ状態の通知先（GUI 表示用。起動時に一度）
     func setLatchHandler(_ handler: (@Sendable (Bool, Int) -> Void)?) {
         lock.lock(); defer { lock.unlock() }
@@ -999,6 +1021,11 @@ enum MIDISourceRoute: Equatable, Sendable {
     case drums
     /// MiniLab / NCXse / （Keystage が居るときの）汎用鍵盤 → 鍵盤 2 経路
     case secondKeyboard
+    /// 操作面（nanoKONTROL2）→ surface 経路。CC の意味は**机で載せた部品**が
+    /// 決める（`SurfaceMapping`。mako 2026-10-04「ナノコントロール 2 の上に
+    /// ミキサーを置く」）。鍵盤扱いしない — フェーダーの CC0-7 は Keystage の席と
+    /// 同じ番号なので、経路ごと分ける
+    case surface
 }
 
 /// 繋いだソース（Jack 結線図の表示用）
@@ -1014,6 +1041,8 @@ final class MIDIInput {
     private var drumsPort = MIDIPortRef()
     /// 鍵盤 2（NCXse）の受信ポート（2nd キーボード計画 ①）
     private var secondKeyboardPort = MIDIPortRef()
+    /// 操作面（nanoKONTROL2）の受信ポート
+    private var surfacePort = MIDIPortRef()
     let router: MIDIRouter
 
     /// Keystage のソースに振った番号（refCon で持たせる。Clock の集計に出る）
@@ -1098,6 +1127,14 @@ final class MIDIInput {
         }
         guard status == noErr else { throw MIDIError.portCreate(status) }
 
+        // 操作面（nanoKONTROL2）— 机で載せた部品が CC の意味を決める
+        status = MIDIInputPortCreateWithProtocol(
+            client, "surface" as CFString, ._1_0, &surfacePort
+        ) { eventList, _ in
+            Self.handle(eventList, route: { routerRef.routeSurface($0, $1, $2) })
+        }
+        guard status == noErr else { throw MIDIError.portCreate(status) }
+
         connectSources()
     }
 
@@ -1110,6 +1147,7 @@ final class MIDIInput {
     static func route(forSourceName name: String, hasKeystage: Bool) -> MIDISourceRoute? {
         if name.contains("Keystage") { return .keystage }
         if name.contains("LPD8") { return .drums }
+        if name.contains("nanoKONTROL") { return .surface }
         // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
         // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
         // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
@@ -1153,7 +1191,7 @@ final class MIDIInput {
         // 変わる（鍵盤 1 ⇄ 鍵盤 2）ので、前回の接続が残ると 2 経路に届く。
         // 未接続のソースを抜いてもエラーが返るだけで害はない
         for source in sources {
-            for port in [keyboardPort, drumsPort, secondKeyboardPort] {
+            for port in [keyboardPort, drumsPort, secondKeyboardPort, surfacePort] {
                 MIDIPortDisconnectSource(port, source)
             }
         }
@@ -1184,6 +1222,9 @@ final class MIDIInput {
             case .secondKeyboard:
                 MIDIPortConnectSource(secondKeyboardPort, source, nil)
                 connectedSources.append("\(name) → 鍵盤2")
+            case .surface:
+                MIDIPortConnectSource(surfacePort, source, nil)
+                connectedSources.append("\(name) → 操作面")
             }
             connected.append(entry)
         }
