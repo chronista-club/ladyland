@@ -30,6 +30,14 @@ enum Desk3DMath {
         return origin + direction * t
     }
 
+    /// フェーダーのつまみのずれ — 音量 1 で奥へ可動幅の半分、0 で手前へ半分。
+    /// `back` は**親の座標での「奥」の向き**（USDZ は外側の入れ物が -90° 回って
+    /// いて、部品の中の座標は Blender のまま — z を動かすと上下に動いてしまう。
+    /// 実機 2026-10-04 mako「フェーダーが上下逆だね」）
+    static func faderOffset(gain: Float, travel: Float, back: SIMD3<Float>) -> SIMD3<Float> {
+        back * ((gain - 0.5) * travel)
+    }
+
     /// 机の座標（m）→ 机の mm（CGPoint の y = z）。mm 単位に丸める
     static func millimeters(_ point: SIMD3<Float>) -> CGPoint {
         CGPoint(x: CGFloat((point.x * 1000).rounded()), y: CGFloat((point.z * 1000).rounded()))
@@ -85,7 +93,7 @@ struct Desk3DView: View {
 @MainActor
 final class Desk3DScene {
     /// 部品が浮く高さ（m）— 機材の天面より上
-    static let hoverY: Float = 0.045
+    static let hoverY: Float = 0.07  // mako 2026-10-04「ミキサーのレイヤーをもう少し上げられる？」
     /// 机に置いた機材（いまは nanoKONTROL2 だけ。机座標 mm の中心）
     let placedGears = [PlacedGear(blueprint: .nanoKontrol2, origin: CGPoint(x: 0, y: 0))]
 
@@ -145,7 +153,7 @@ final class Desk3DScene {
         root.addChild(sun)
         let camera = PerspectiveCamera()
         camera.camera.fieldOfViewInDegrees = 40
-        camera.look(at: [0, 0, 0.03], from: [0, 0.42, 0.46], relativeTo: nil)
+        camera.look(at: [0, 0.01, 0.045], from: [0, 0.33, 0.37], relativeTo: nil)
         root.addChild(camera)
         return root
     }
@@ -273,9 +281,10 @@ final class Desk3DScene {
             let slot = bank.indices.contains(i) ? appState.rack.slots[bank[i]] : nil
             // フェーダー — Mixer が載っていればその Track の音量の位置（上 = 奥）
             if let fader = parts["fader_\(n)"], let home = partHome["fader_\(n)"] {
-                let travel = Float(0.032)
                 let gain = mixerOnFaders ? (slot?.gain ?? 0) : 0.5
-                fader.position = home + [0, 0, (0.5 - gain) * travel]
+                // 机の「奥」（-z）を部品の親の座標へ直してから動かす
+                let back = fader.parent?.convert(direction: [0, 0, -1], from: nil) ?? [0, 0, -1]
+                fader.position = home + Desk3DMath.faderOffset(gain: gain, travel: 0.032, back: back)
             }
             // M — ミュート中は赤
             if let mute = parts["m_\(n)"].flatMap(Self.model(of:)) {
@@ -300,8 +309,8 @@ final class Desk3DScene {
                 .offsetBy(dx: gear.origin.x, dy: gear.origin.y)
             return [Float(rect.midX) / 1000, Self.hoverY, Float(rect.midY) / 1000]
         }
-        let tray: Float = component == .mixer ? -0.13 : 0.13
-        return [tray, 0.004, 0.17]
+        let tray: Float = component == .mixer ? -0.12 : 0.12
+        return [tray, 0.004, 0.115]
     }
 
     // MARK: - ドラッグ

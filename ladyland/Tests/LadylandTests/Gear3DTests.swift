@@ -193,3 +193,21 @@ struct DeskRayTests {
         #expect(Desk3DMath.millimeters([0.1, 0.03, -0.02]) == CGPoint(x: 100, y: -20))
     }
 }
+
+@Suite("3D の机 — フェーダーのつまみの位置")
+struct FaderOffsetTests {
+    @Test("音量 1 = 奥へ可動幅の半分、0 = 手前へ半分、0.5 = 真ん中")
+    func offset() {
+        let back = SIMD3<Float>(0, 0, -1)
+        #expect(Desk3DMath.faderOffset(gain: 1, travel: 0.032, back: back) == SIMD3<Float>(0, 0, -0.016))
+        #expect(Desk3DMath.faderOffset(gain: 0, travel: 0.032, back: back) == SIMD3<Float>(0, 0, 0.016))
+        #expect(Desk3DMath.faderOffset(gain: 0.5, travel: 0.032, back: back) == .zero)
+    }
+
+    @Test("親が回っていても『奥』の向きに沿う（USDZ は外側が -90° 回っている）")
+    func rotatedParent() {
+        // Blender の座標のまま（y = 奥行き、手前が -y）— 奥は +y
+        let back = SIMD3<Float>(0, 1, 0)
+        #expect(Desk3DMath.faderOffset(gain: 1, travel: 0.032, back: back) == SIMD3<Float>(0, 0.016, 0))
+    }
+}
