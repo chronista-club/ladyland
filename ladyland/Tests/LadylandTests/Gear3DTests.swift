@@ -211,3 +211,30 @@ struct FaderOffsetTests {
         #expect(Desk3DMath.faderOffset(gain: 1, travel: 0.032, back: back) == SIMD3<Float>(0, 0.016, 0))
     }
 }
+
+@Suite("3D の机 — 載せた部品で機材を包む（サンドイッチ）")
+struct SleeveTests {
+    // セクションの足跡 x 0…100 mm、機材の奥行き -0.04…0.04 m、天面 0.03 m、余白 5 mm、厚み 2 mm
+    let frames = Desk3DMath.sleeve(
+        section: CGRect(x: 0, y: -10, width: 100, height: 40),
+        gearMinZ: -0.04, gearMaxZ: 0.04, top: 0.03, margin: 0.005, thickness: 0.002)
+
+    private func near(_ a: SIMD3<Float>?, _ b: SIMD3<Float>) -> Bool {
+        a.map { simd_distance($0, b) < 1e-6 } ?? false
+    }
+
+    @Test("上と下の板は同じ広さ — セクションの幅 + 余白 × 機材の奥行き + 余白")
+    func plates() {
+        #expect(near(frames["top"]?.size, [0.11, 0.002, 0.09]))
+        #expect(near(frames["bottom"]?.size, [0.11, 0.002, 0.09]))
+        #expect(near(frames["top"]?.center, [0.05, 0.03 + 0.005, 0]), "天面の上に余白ぶん浮く")
+        #expect(near(frames["bottom"]?.center, [0.05, 0.001, 0]), "机の面すれすれ")
+    }
+
+    @Test("左右の壁で上下をつなぐ（帯になる）")
+    func walls() {
+        #expect(near(frames["left"]?.center, [-0.005, 0.0175, 0]))
+        #expect(near(frames["right"]?.center, [0.105, 0.0175, 0]))
+        #expect(near(frames["left"]?.size, [0.002, 0.035, 0.09]))
+    }
+}
