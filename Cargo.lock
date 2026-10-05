@@ -560,6 +560,7 @@ dependencies = [
  "cortex-types",
  "glyphon",
  "ndarray",
+ "pollster",
  "thiserror 1.0.69",
  "tracing",
  "video-rs",
