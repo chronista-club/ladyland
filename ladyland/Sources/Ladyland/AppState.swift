@@ -26,6 +26,9 @@ final class AppState: ObservableObject {
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
     /// 固定先が選択と割れても正しい席の割当を見る — `drumFaceKnobs` と同じ作法）
     let secondFaceKnobs = FaceKnobController()
+    /// 操作面（nanoKONTROL2）のフェーダー → 音量のピックアップ（席ごと。
+    /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
+    private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
     let ledBus = LedBus()
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
@@ -90,6 +93,17 @@ final class AppState: ObservableObject {
             guard synthInput1Slot != oldValue else { return }
             updateRouting()
             scheduleAutosave()  // [常時保存 25] シンセ入力 1 の担当スロット
+        }
+    }
+
+    /// **LPD8 ノブ 8 の刺し先**（spec/09 Jack。mako 裁定 2026-09-26「Keystage の
+    /// つまみで出来ていたことを LPD8 で代用したい」）。drums = ドラム席の顔つまみ
+    /// （従来）、face = 選択 Track の顔つまみ（位置 → 現ページの席）
+    @Published var lpd8KnobJack: Lpd8KnobJack = .drums {
+        didSet {
+            guard lpd8KnobJack != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()  // [常時保存 26] LPD8 ノブの刺し先
         }
     }
 
@@ -264,6 +278,9 @@ final class AppState: ObservableObject {
     /// いま繋がっている MIDI ソース（Jack 結線図の接続表示用。
     /// `connectSources` の記録をそのまま映す — 挿抜で更新）
     @Published private(set) var midiConnectedSources: [String] = []
+
+    /// 同じものを結線先つきで（Jack 結線図の行 — 汎用鍵盤は名前で行になる）
+    @Published private(set) var midiConnected: [MIDIConnectedSource] = []
 
     @Published private(set) var latchEngaged = false
     @Published private(set) var latchSustaining = 0
@@ -687,6 +704,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -901,6 +919,12 @@ final class AppState: ObservableObject {
             }
         }
 
+        // 操作面（nanoKONTROL2）→ 机で載せた部品の操作（mako 2026-10-04
+        // 「ナノコントロール 2 の上にミキサーを置く」）
+        router.setSurfaceHandler { [weak self] cc, value in
+            DispatchQueue.main.async { self?.handleSurface(cc: cc, value: value) }
+        }
+
         // MIDI ルーティングトレース → Debug ウィンドウ（design/06 §8 追補）。
         // RT スレッドで MidiRoute 値型が発行され、ここ（main）で名前を足して
         // 整形する。連続ストリームは collapse key で 1 行に畳まれる
@@ -963,8 +987,10 @@ final class AppState: ObservableObject {
             self?.keystage.reconnect()
             // Jack 結線図の接続表示（挿抜で線の色が変わる）
             self?.midiConnectedSources = self?.midi?.connectedSources ?? []
+            self?.midiConnected = self?.midi?.connected ?? []
         }
         midiConnectedSources = midi?.connectedSources ?? []
+        midiConnected = midi?.connected ?? []
         ledBus.start()
         pushBaseColors()
     }
@@ -1097,6 +1123,8 @@ final class AppState: ObservableObject {
             secondKeyboardSlot = snapshot.secondKeyboardSlot
             // シンセ入力 1 の固定（同上）
             synthInput1Slot = snapshot.synthInput1Slot
+            // LPD8 ノブの刺し先（nil = drums = 導入前の挙動）
+            lpd8KnobJack = snapshot.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) ?? .drums
             restoreTask?.cancel()
             restoreTask = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1349,6 +1377,31 @@ final class AppState: ObservableObject {
         scheduleRotoLiveBurn()  // MIXER 冊の席名・ミュートボタン名が変わる
     }
 
+    /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
+    func handleSurface(cc: UInt8, value: UInt8) {
+        let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
+        guard
+            let action = SurfaceMapping.action(
+                cc: cc, value: value, docks: windowPlacement.docks ?? [:], bank: bank,
+                page: activeKnobPage ?? rotoPage)
+        else { return }
+        switch action {
+        case .gain(let index, let gain):
+            guard rack.slots.indices.contains(index) else { return }
+            let slot = rack.slots[index]
+            // ピックアップ — 実機のフェーダーが今の音量を通るまで掴まない
+            guard surfaceGainPickup.accept(knob: index, value: Double(gain), target: Double(slot.gain))
+            else { return }
+            setGain(slot, to: gain)
+        case .toggleMute(let index):
+            guard rack.slots.indices.contains(index) else { return }
+            toggleMute(rack.slots[index])
+        case .trackKnob(let seat, let value):
+            faceKnobs.handle(knob: seat, value127: Int(value))
+            scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
+        }
+    }
+
     /// トラックの gain を直接設定する（Track 面のスライダー）
     func setGain(_ slot: InstrumentSlot, to value: Float) {
         slot.gain = min(1.0, max(0.0, value))
@@ -1566,6 +1619,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -1610,6 +1664,9 @@ final class AppState: ObservableObject {
                 }
                 if let synth = partial.synthInput1Slot { synthInput1Slot = synth }
                 if let second = partial.secondKeyboardSlot { secondKeyboardSlot = second }
+                if let jack = partial.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) {
+                    lpd8KnobJack = jack
+                }
                 if let keystage = partial.keystage,
                    let decoded = try? JSONDecoder().decode(
                        KeystageSettings.self, from: Data(keystage.utf8)) {
@@ -1806,6 +1863,21 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 drumController.handle(knob: Int(cc), value127: Int(value))
                 self?.scheduleAutosave()  // [常時保存 18] LPD8 顔つまみ
+            }
+        }
+        // LPD8 ノブ → **選択 Track の顔つまみ**（`Lpd8KnobJack.face`。Keystage の
+        // ノブ帯の代役 — 位置 i → 現ページの席 i、席は `faceKnobs` と共有なので
+        // ピックアップも同じ帳簿）。drums なら空集合 = 上の従来経路だけが効く
+        let faceCCs = lpd8KnobJack == .face ? Lpd8FaceKnobs.interceptedCCs(current: lpd8KnobCCs) : []
+        let currentKnobCCs = lpd8KnobCCs
+        router.setLpd8FaceRouting(ccs: faceCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let page = self.activeKnobPage ?? self.rotoPage
+                guard let seat = Lpd8FaceKnobs.seat(forCC: cc, current: currentKnobCCs, page: page)
+                else { return }
+                controller.handle(knob: seat, value127: Int(value))
+                self.scheduleAutosave()  // [常時保存 27] LPD8 → 顔つまみ
             }
         }
 

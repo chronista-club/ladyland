@@ -33,7 +33,8 @@ enum WindowMode: String, Codable, CaseIterable {
 enum SurfaceTab: String, Codable, CaseIterable {
     // 並び = タブの表示順（mako 裁定 2026-08-14「Track, ROTO, Keystage,
     // LPD8 の順」— 席そのものが先頭、機材があと。Jack（結線図）は末尾）
-    case track, roto, keystage, lpd8, jack
+    // Mixer（8ch。mako 火花 2026-10-01）は席の一覧なので Track の隣
+    case track, mixer, roto, keystage, lpd8, jack
 
     /// タブに出す機材名（Track だけ機材ではなく**選択中の席そのもの**）
     var title: String {
@@ -42,6 +43,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .lpd8: return "LPD8"
         case .roto: return "ROTO"
         case .track: return "Track"
+        case .mixer: return "Mixer"
         case .jack: return "Jack"
         }
     }
@@ -66,6 +68,8 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .lpd8: return "square.grid.3x2.fill"
         case .roto: return "dial.medium.fill"
         case .track: return "tag.fill"
+        // Mixer = 縦フェーダーの列（DAW のミキサーの形）
+        case .mixer: return "slider.vertical.3"
         // Jack = 結線 — ケーブルの差込口そのもの
         case .jack: return "cable.connector"
         }
@@ -98,6 +102,14 @@ struct WindowPreferences: Codable, Equatable {
     /// optional なので導入前の window.json もそのまま読める（2026-09-12）
     var panes: [String: PanePlacement]?
 
+    /// 机の上の機材の置き場（`DeskGear.rawValue` → 0-1 の机座標。2026-10-01）。
+    /// マシン固有 = 会場ごとの配置。無ければ既定の並び（奥 Mixer / 中 LPD8 / 手前 鍵盤）
+    var desk: [String: DeskPlacement]?
+
+    /// 机で載せた仮想の部品（`VirtualComponent.rawValue` → セクション id。
+    /// 2026-10-04）。機材の組み合わせは会場ごとなのでマシン固有に置く
+    var docks: [String: String]?
+
     static let `default` = WindowPreferences(mode: .fullscreen, frame: nil, screenUUID: nil)
 }
 
@@ -107,7 +119,7 @@ struct WindowPreferences: Codable, Equatable {
 /// Track は選択に張り付く面なので対象外。⚠️ raw 値は `window.json` に入る —
 /// `SurfaceTab` と同じく**追加は安全・改名は危険**（テストで固定）
 enum PaneID: String, Codable, CaseIterable {
-    case jack, keystage, lpd8, roto
+    case jack, keystage, lpd8, roto, mixer
 
     init?(surface: SurfaceTab) {
         switch surface {
@@ -115,6 +127,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .keystage: self = .keystage
         case .lpd8: self = .lpd8
         case .roto: self = .roto
+        case .mixer: self = .mixer
         case .track: return nil
         }
     }
@@ -125,6 +138,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .keystage: return .keystage
         case .lpd8: return .lpd8
         case .roto: return .roto
+        case .mixer: return .mixer
         }
     }
 
@@ -133,8 +147,11 @@ enum PaneID: String, Codable, CaseIterable {
     /// 初回に開くときの寸法（Jack は 3 列の結線図が収まる幅）
     var defaultSize: CGSize {
         switch self {
-        case .jack: return CGSize(width: 960, height: 560)
+        // Jack は結線図 + 机（2.5D）が縦に並ぶ
+        case .jack: return CGSize(width: 960, height: 900)
         case .keystage, .lpd8, .roto: return CGSize(width: 720, height: 640)
+        // 8 本のストリップ（64pt + 間隔）が横に収まる幅
+        case .mixer: return CGSize(width: 640, height: 360)
         }
     }
 
@@ -142,6 +159,7 @@ enum PaneID: String, Codable, CaseIterable {
         switch self {
         case .jack: return CGSize(width: 720, height: 400)
         case .keystage, .lpd8, .roto: return CGSize(width: 480, height: 400)
+        case .mixer: return CGSize(width: 600, height: 280)
         }
     }
 }
@@ -569,6 +587,33 @@ final class WindowPlacementController: ObservableObject {
         guard panes[pane.rawValue] != placement else { return }
         panes[pane.rawValue] = placement
         prefs.panes = panes
+        scheduleSave()
+    }
+
+    // MARK: - 机（2.5D の Jack）
+
+    var deskPlacements: [String: DeskPlacement]? { prefs.desk }
+
+    /// 机で載せた部品（3D の机）
+    var docks: [String: String]? { prefs.docks }
+
+    /// 載せる / 外す（nil = 外す）。1 つのセクションに部品は 1 つ
+    func setDock(_ component: VirtualComponent, on section: String?) {
+        let next = DockModel.docking(component, on: section, in: prefs.docks ?? [:])
+        guard next != (prefs.docks ?? [:]) else { return }
+        objectWillChange.send()
+        prefs.docks = next
+        scheduleSave()
+    }
+
+    /// 機材を置き直す（ドラッグを**離したとき**だけ呼ぶ — sidebar 幅と同じ作法）
+    func setDeskPlacement(_ gear: DeskGear, _ placement: DeskPlacement) {
+        var desk = prefs.desk ?? [:]
+        let clamped = DeskModel.clamp(placement)
+        guard desk[gear.rawValue] != clamped else { return }
+        objectWillChange.send()
+        desk[gear.rawValue] = clamped
+        prefs.desk = desk
         scheduleSave()
     }
 
