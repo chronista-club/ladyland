@@ -38,6 +38,8 @@ enum MidiRoute: Sendable, Equatable {
     /// ⚠️ **Keystage の帯の解釈は通らない** — NCXse の CC0/32/7 は Bank Select
     /// や音量であって席ではない（実測 2026-08-10。同じ番号でも面が違えば別物）
     case secondKeyboard(status: UInt8, data1: UInt8, data2: UInt8, hasTarget: Bool)
+    /// 操作面（nanoKONTROL2）の CC — 意味は机で載せた部品が決める
+    case surface(cc: UInt8, value: UInt8)
 }
 
 extension MidiRoute {
@@ -115,6 +117,8 @@ enum MidiTraceFormat {
         case .secondKeyboard(let status, let d1, let d2, let hasTarget):
             let dest = hasTarget ? (secondSlot ?? selectedSlot) : "(送り先なし)"
             return message(status, d1, d2, from: "鍵盤2", to: dest)
+        case .surface(let cc, let value):
+            return ("surface-\(cc)", "操作面 CC\(cc) = \(value)")
         }
     }
 

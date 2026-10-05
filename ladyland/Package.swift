@@ -5,7 +5,9 @@ import PackageDescription
 let package = Package(
     name: "ladyland",
     platforms: [
-        .macOS(.v14)
+        // macOS 15 — 3D の机（RealityKit の RealityView / 部品を掴むジェスチャ）が
+        // macOS 15 から（2026-10-04）
+        .macOS(.v15)
     ],
     dependencies: [
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。

@@ -1,0 +1,15 @@
+{
+  "note": "机の上の並び（mako 2026-10-05「3D の机に全部載せて」）。単位 mm、座標はアプリと同じ（x = 右 +、z = 手前 +、機材の中心）。size は上から見た外形（重なりの確認用）。アプリ（Desk3DView）と Blender（look.py の接地の暗がり・全周の撮影）が両方読む",
+  "desk": {"center": [0, 70], "size": [1500, 1100]},
+  "gear": [
+    {"id": "roto", "center": [-420, -360], "size": [341, 99]},
+    {"id": "nanokontrol", "center": [0, -360], "size": [325, 83]},
+    {"id": "lpd8", "center": [400, -360], "size": [306, 81]},
+    {"id": "minilab", "center": [-450, -150], "size": [355, 220]},
+    {"id": "fgdp50", "center": [470, -150], "size": [223, 223]},
+    {"id": "keystage", "center": [0, 120], "size": [979, 234]},
+    {"id": "ncxse", "center": [0, 440], "size": [1270, 224]}
+  ],
+  "tray": {"mixer": [-120, -150], "trackKnobs": [120, -150]},
+  "camera": {"from": [0, 1050, 1150], "at": [0, 0, 60], "fov": 40}
+}

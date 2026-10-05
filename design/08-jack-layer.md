@@ -41,6 +41,32 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1g. **机に 7 台(2026-10-05、mako「3D の机に全部載せて」)**: 並びは `Gear/desk_layout.json`
+    (アプリと Blender の両方が読む。机の大きさ・各機材の中心・部品の置き場・カメラ)。
+    `gear_build.py` は USDZ と一緒に配置データ(JSON、鍵盤は展開済み)を書き出し、アプリは
+    `GearBlueprint.decode` で部品とセクションを読む(nanoKONTROL2 だけ Swift の下書き)。
+    部品は「機材 id / 部品名」で引く(knob_1 などは機材をまたいで重なる)。帯は載った先ごとに
+    作り直す。Track ノブは 8 本以上のノブ列ならどれにも載り、LPD8 のノブ列に載せる / 外すと
+    `lpd8KnobJack` も face / drums に切り替わる。MIDI の意味まで繋がっているのは nanoKONTROL2
+    (操作面)と LPD8 のノブ(刺し先)だけ — ほかは載せて形を見る段階
+1f. **見た目は Blender で決める(2026-10-04、方針「A + AO」)**: mako「見た目の雰囲気は、
+    ここでしっかり落とし込む。各クライアントは微調整くらい」。`Gear/look.py` が
+    ソフトボックス(発光する板)とワールドを組み、機材の位置から全周を Cycles で撮って
+    `environment.exr` に、机の接地の暗がりと筐体の隙間を AO で焼いて色に合成し
+    `desk.usdz` / `nanokontrol.usdz` に書く。アプリは環境マップで照らし
+    (`ImageBasedLightComponent`)、足すのは `exposure` の微調整だけ。
+    ⚠️ RealityKit は USD の中のライトを読まない(光は画像で運ぶ)/ 焼いた色は sRGB で書く
+    (線形のままだと約 1/10 の明るさ)/ USD の Preview Surface は Base Color に画像が
+    直結した形しか運ばない(Mix 節点は落ちる)ので、色 × AO は画像に合成してから繋ぐ
+1e. **3D の机(2026-10-04)**: RealityKit(`Desk3DView`、macOS 15 へ引き上げ)。
+    `Gear3D.swift`(純関数)— `GearBlueprint`(実寸 mm の下書き。可動部は名前付き部品
+    `fader_1` 等)、`VirtualComponent.canDock`(Jack の契約)、`DockModel`(落とした点 →
+    セクション、載せ替え)、`SurfaceMapping`(実機の CC → 載せた部品の操作)。
+    載せ先は window.json の `docks`。清書は Blender → `~/Library/Application Support/
+    ladyland/gear/<id>.usdz` に置けば下書きの代わりに読む(部品は同じ名前で掴む)。
+    nanoKONTROL2 の模型は `ladyland/Gear/nanokontrol.py`(Blender スクリプト。Blender
+    MCP からも流せる)で組んで書き出す。USDZ では部品名が入れ物(Xform)と形(Mesh)の
+    2 段になるので、材質を替えるときは子の形まで辿る(`Desk3DScene.model(of:)`)
 1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
     ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
     落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。

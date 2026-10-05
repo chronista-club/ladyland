@@ -106,6 +106,10 @@ struct WindowPreferences: Codable, Equatable {
     /// マシン固有 = 会場ごとの配置。無ければ既定の並び（奥 Mixer / 中 LPD8 / 手前 鍵盤）
     var desk: [String: DeskPlacement]?
 
+    /// 机で載せた仮想の部品（`VirtualComponent.rawValue` → セクション id。
+    /// 2026-10-04）。機材の組み合わせは会場ごとなのでマシン固有に置く
+    var docks: [String: String]?
+
     static let `default` = WindowPreferences(mode: .fullscreen, frame: nil, screenUUID: nil)
 }
 
@@ -589,6 +593,18 @@ final class WindowPlacementController: ObservableObject {
     // MARK: - 机（2.5D の Jack）
 
     var deskPlacements: [String: DeskPlacement]? { prefs.desk }
+
+    /// 机で載せた部品（3D の机）
+    var docks: [String: String]? { prefs.docks }
+
+    /// 載せる / 外す（nil = 外す）。1 つのセクションに部品は 1 つ
+    func setDock(_ component: VirtualComponent, on section: String?) {
+        let next = DockModel.docking(component, on: section, in: prefs.docks ?? [:])
+        guard next != (prefs.docks ?? [:]) else { return }
+        objectWillChange.send()
+        prefs.docks = next
+        scheduleSave()
+    }
 
     /// 機材を置き直す（ドラッグを**離したとき**だけ呼ぶ — sidebar 幅と同じ作法）
     func setDeskPlacement(_ gear: DeskGear, _ placement: DeskPlacement) {

@@ -21,6 +21,9 @@ import SwiftUI
 struct JackBoardView: View {
     @Environment(\.creoTheme) private var theme
     @EnvironmentObject private var appState: AppState
+    /// 広い版の机 — 3D（実寸の機材に部品を載せる）か 2.5D（全機材の結線）か。
+    /// 3D が全機材に追いつくまでの切替（2026-10-04）
+    @AppStorage("ladyland.desk3d") private var desk3D = true
 
     // MARK: - 姿（幅で決まる。別ウィンドウに切り離すと広い版になる）
 
@@ -96,7 +99,19 @@ struct JackBoardView: View {
     var body: some View {
         GeometryReader { geometry in
             switch Self.layout(forWidth: geometry.size.width) {
-            case .wide: DeskView()
+            case .wide:
+                (desk3D ? AnyView(Desk3DView()) : AnyView(DeskView()))
+                    .overlay(alignment: .topTrailing) {
+                        Picker("", selection: $desk3D) {
+                            Text("3D").tag(true)
+                            Text("2.5D").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .frame(width: 110)
+                        .padding(CreoUITokens.spacingS)
+                    }
             case .sidebar: board
             }
         }
