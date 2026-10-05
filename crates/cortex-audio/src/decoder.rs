@@ -6,23 +6,86 @@
 use std::fs::File;
 use std::path::Path;
 
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
+use symphonia::core::formats::probe::Hint;
 
 use cortex_types::{AudioFrame, WaveError, WaveResult};
 
 /// オーディオデコーダー
 pub struct AudioDecoder {
     format: Box<dyn symphonia::core::formats::FormatReader>,
-    decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    decoder: Box<dyn symphonia::core::codecs::audio::AudioDecoder>,
     track_id: u32,
     sample_rate: u32,
     channels: u16,
     current_time: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decode_pcm_wav(channels: u16) {
+        let frames = 5000usize;
+        let rate = 48000u32;
+        let data_len = (frames * channels as usize * 2) as u32;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&channels.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+        wav.extend_from_slice(&(channels * 2).to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for index in 0..frames {
+            let sample = [-16384i16, 0, 16384][index % 3];
+            wav.extend_from_slice(&sample.to_le_bytes());
+            if channels == 2 {
+                wav.extend_from_slice(&(-sample).to_le_bytes());
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "cortex-decoder-{}-{channels}.wav", std::process::id()
+        ));
+        std::fs::write(&path, wav).unwrap();
+        let mut decoder = AudioDecoder::from_file(&path).unwrap();
+        assert_eq!(decoder.sample_rate(), rate);
+        assert_eq!(decoder.channels(), channels);
+        let mut decoded_frames = 0;
+        while let Some(frame) = decoder.decode_frame().unwrap() {
+            assert!((frame.timestamp - decoded_frames as f64 / rate as f64).abs() < 1e-9);
+            assert_eq!(frame.sample_rate, rate);
+            assert_eq!(frame.left.len(), frame.right.len());
+            for (left, right) in frame.left.iter().zip(&frame.right) {
+                let expected = [-0.5f32, 0.0, 0.5][decoded_frames % 3];
+                assert_eq!(*left, expected);
+                assert_eq!(*right, if channels == 2 { -expected } else { expected });
+                decoded_frames += 1;
+            }
+        }
+        assert_eq!(decoded_frames, frames);
+        assert!(decoder.decode_frame().unwrap().is_none());
+        drop(decoder);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn decodes_stereo_samples_timestamps_and_eof() {
+        decode_pcm_wav(2);
+    }
+
+    #[test]
+    fn duplicates_mono_into_both_output_channels() {
+        decode_pcm_wav(1);
+    }
 }
 
 impl AudioDecoder {
@@ -40,22 +103,20 @@ impl AudioDecoder {
 
         let format_opts = FormatOptions::default();
         let metadata_opts = MetadataOptions::default();
-        let decoder_opts = DecoderOptions::default();
+        let decoder_opts = AudioDecoderOptions::default();
 
-        let probed = symphonia::default::get_probe()
-            .format(&hint, mss, &format_opts, &metadata_opts)
+        let format = symphonia::default::get_probe()
+            .probe(&hint, mss, format_opts, metadata_opts)
             .map_err(|e| WaveError::Decode(format!("Unsupported format: {}", e)))?;
 
-        let format = probed.format;
-
-        let track = format
+        let (track_id, codec_params) = format
             .tracks()
             .iter()
-            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+            .find_map(|track| {
+                let params = track.codec_params.as_ref()?.audio()?;
+                (params.codec != CODEC_ID_NULL_AUDIO).then_some((track.id, params))
+            })
             .ok_or_else(|| WaveError::Decode("No audio track found".into()))?;
-
-        let track_id = track.id;
-        let codec_params = &track.codec_params;
 
         let sample_rate = codec_params
             .sample_rate
@@ -63,11 +124,12 @@ impl AudioDecoder {
 
         let channels = codec_params
             .channels
+            .as_ref()
             .map(|c| c.count() as u16)
             .unwrap_or(2);
 
         let decoder = symphonia::default::get_codecs()
-            .make(codec_params, &decoder_opts)
+            .make_audio_decoder(codec_params, &decoder_opts)
             .map_err(|e| WaveError::Decode(format!("Failed to create decoder: {}", e)))?;
 
         Ok(Self {
@@ -94,7 +156,8 @@ impl AudioDecoder {
     pub fn decode_frame(&mut self) -> WaveResult<Option<AudioFrame>> {
         loop {
             let packet = match self.format.next_packet() {
-                Ok(packet) => packet,
+                Ok(Some(packet)) => packet,
+                Ok(None) => return Ok(None),
                 Err(symphonia::core::errors::Error::IoError(ref e))
                     if e.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
@@ -103,7 +166,7 @@ impl AudioDecoder {
                 Err(e) => return Err(WaveError::Decode(format!("Failed to read packet: {}", e))),
             };
 
-            if packet.track_id() != self.track_id {
+            if packet.track_id != self.track_id {
                 continue;
             }
 
@@ -116,14 +179,9 @@ impl AudioDecoder {
                 Err(e) => return Err(WaveError::Decode(format!("Failed to decode: {}", e))),
             };
 
-            let spec = *decoded.spec();
-            let duration = decoded.capacity();
-
-            let mut sample_buf = SampleBuffer::<f32>::new(duration as u64, spec);
-            sample_buf.copy_interleaved_ref(decoded);
-
-            let samples = sample_buf.samples();
-            let channels = spec.channels.count();
+            let channels = decoded.spec().channels().count();
+            let mut samples = Vec::<f32>::new();
+            decoded.copy_to_vec_interleaved(&mut samples);
 
             let (left, right) = if channels >= 2 {
                 let left: Vec<f32> = samples.iter().step_by(channels).copied().collect();

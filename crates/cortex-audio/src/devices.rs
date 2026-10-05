@@ -86,7 +86,7 @@ pub fn list_devices(direction: Direction) -> WaveResult<Vec<AudioDeviceInfo>> {
             Direction::Output => device.default_output_config().ok(),
             Direction::Input => device.default_input_config().ok(),
         }
-        .map(|c| (c.channels(), c.sample_rate().0));
+        .map(|c| (c.channels(), c.sample_rate()));
 
         let configs = match direction {
             Direction::Output => device
@@ -103,8 +103,8 @@ pub fn list_devices(direction: Direction) -> WaveResult<Vec<AudioDeviceInfo>> {
                     .into_iter()
                     .map(|r| SupportedRange {
                         channels: r.channels(),
-                        min_sample_rate: r.min_sample_rate().0,
-                        max_sample_rate: r.max_sample_rate().0,
+                        min_sample_rate: r.min_sample_rate(),
+                        max_sample_rate: r.max_sample_rate(),
                         sample_format: format!("{}", r.sample_format()),
                     })
                     .collect()
