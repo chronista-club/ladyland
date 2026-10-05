@@ -14,6 +14,37 @@ use crate::shader_types::{RenderConfig, ShaderUniforms};
 use crate::pipeline::ShaderPipeline;
 use crate::text_overlay::TextOverlay;
 
+fn surface_texture(state: wgpu::CurrentSurfaceTexture) -> WaveResult<Option<wgpu::SurfaceTexture>> {
+    match state {
+        wgpu::CurrentSurfaceTexture::Success(texture)
+        | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => Ok(Some(texture)),
+        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => Ok(None),
+        state => Err(WaveError::Graphics(format!("Failed to get surface texture: {state:?}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_surface_states_skip_a_frame() {
+        assert!(surface_texture(wgpu::CurrentSurfaceTexture::Timeout).unwrap().is_none());
+        assert!(surface_texture(wgpu::CurrentSurfaceTexture::Occluded).unwrap().is_none());
+    }
+
+    #[test]
+    fn unusable_surfaces_report_an_error() {
+        for state in [
+            wgpu::CurrentSurfaceTexture::Outdated,
+            wgpu::CurrentSurfaceTexture::Lost,
+            wgpu::CurrentSurfaceTexture::Validation,
+        ] {
+            assert!(surface_texture(state).is_err());
+        }
+    }
+}
+
 /// GPUレンダラー
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -31,10 +62,7 @@ pub struct Renderer {
 impl Renderer {
     /// 新しいレンダラーを作成
     pub async fn new(window: Arc<Window>, render_config: RenderConfig) -> WaveResult<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         let surface = instance
             .create_surface(window.clone())
@@ -45,6 +73,7 @@ impl Renderer {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .map_err(|e| WaveError::Graphics(format!("No suitable GPU adapter found: {}", e)))?;
@@ -85,6 +114,7 @@ impl Renderer {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         surface.configure(&device, &config);
@@ -176,10 +206,9 @@ impl Renderer {
 
     /// フレームをレンダリング
     pub fn render(&mut self) -> WaveResult<()> {
-        let output = self
-            .surface
-            .get_current_texture()
-            .map_err(|e| WaveError::Graphics(format!("Failed to get surface texture: {}", e)))?;
+        let Some(output) = surface_texture(self.surface.get_current_texture())? else {
+            return Ok(());
+        };
 
         let view = output
             .texture
@@ -227,7 +256,7 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
 
         // テキストアトラスのトリム
         if let Some(ref mut text_overlay) = self.text_overlay {
@@ -335,7 +364,8 @@ impl Renderer {
             .unwrap()
             .map_err(|e| WaveError::Graphics(format!("Failed to map buffer: {:?}", e)))?;
 
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice.get_mapped_range()
+            .map_err(|e| WaveError::Graphics(format!("Failed to read mapped buffer: {e}")))?;
 
         // パディングを除去してRGBAデータを抽出
         let mut result = Vec::with_capacity((4 * self.config.width * self.config.height) as usize);
