@@ -26,6 +26,15 @@ final class AppState: ObservableObject {
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
     /// 固定先が選択と割れても正しい席の割当を見る — `drumFaceKnobs` と同じ作法）
     let secondFaceKnobs = FaceKnobController()
+    let miniLabFaceKnobs = FaceKnobController()
+    @Published var studioSelection = StudioTrackSelection()
+    @Published var miniLabSlot: Int? {
+        didSet {
+            guard miniLabSlot != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()
+        }
+    }
     /// 操作面（nanoKONTROL2）のフェーダー → 音量のピックアップ（席ごと。
     /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
     private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
@@ -107,7 +116,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// 鍵盤 2（NCXse / MiniLab）= シンセ入力 2 の担当スロット（**nil = 選択に
+    /// 鍵盤 2（NCXse）= シンセ入力 2 の担当スロット（**nil = 選択に
     /// 追従**。指定 = その席に固定。2nd キーボード計画 ②、mako 裁定 2026-08-10
     /// 「別々の二つの音源同時に弾きたい」）。タイルの右クリックで固定する
     @Published var secondKeyboardSlot: Int? {
@@ -704,6 +713,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
@@ -938,7 +948,8 @@ final class AppState: ObservableObject {
                 let secondName =
                     "slot \(secondIndex + 1) (\(self.rack.slots.indices.contains(secondIndex) ? (self.rack.slots[secondIndex].displayName ?? "empty") : "?"))"
                 let line = MidiTraceFormat.line(
-                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName)
+                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName,
+                    miniLabSlot: "slot \((self.miniLabSlot ?? self.rack.selected) + 1)")
                 self.debugLog.append(line.text, collapseKey: line.key, kind: .midi)
 
                 // ノブページの追従（ノブストリップの見出し）。トレースは
@@ -1121,6 +1132,7 @@ final class AppState: ObservableObject {
             pedalInverted = snapshot.pedalInverted ?? false
             // 鍵盤 2 の固定（nil = 選択に追従。導入前のデータもそのまま）
             secondKeyboardSlot = snapshot.secondKeyboardSlot
+            miniLabSlot = snapshot.miniLabSlot
             // シンセ入力 1 の固定（同上）
             synthInput1Slot = snapshot.synthInput1Slot
             // LPD8 ノブの刺し先（nil = drums = 導入前の挙動）
@@ -1194,6 +1206,7 @@ final class AppState: ObservableObject {
     // MARK: - UI からの操作（すべてここを通す）
 
     func select(_ index: Int) {
+        if studioSelection.pending?.slot != index { studioSelection.cancel() }
         rack.select(index)
         updateRouting()
         flashSelectionLed()
@@ -1201,6 +1214,7 @@ final class AppState: ObservableObject {
     }
 
     func selectNext() {
+        studioSelection.cancel()
         rack.selectNext()
         updateRouting()
         flashSelectionLed()
@@ -1208,6 +1222,7 @@ final class AppState: ObservableObject {
     }
 
     func selectPrevious() {
+        studioSelection.cancel()
         rack.selectPrevious()
         updateRouting()
         flashSelectionLed()
@@ -1216,6 +1231,7 @@ final class AppState: ObservableObject {
 
     /// 選択カーソルの相対移動（Cmd+矢印: ±1 = 左右、±8 = 行ジャンプ）
     func selectOffset(_ delta: Int) {
+        studioSelection.cancel()
         rack.selectOffset(delta)
         updateRouting()
         flashSelectionLed()
@@ -1380,12 +1396,27 @@ final class AppState: ObservableObject {
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
     func handleSurface(cc: UInt8, value: UInt8) {
         let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
+        if windowPlacement.docks?["mixer"] == "nanokontrol.faders" {
+            if (cc == 58 || cc == 59), value > 0 {
+                stepStudioBank(cc == 58 ? -1 : 1)
+                return
+            }
+            if (16..<24).contains(cc), let pending = studioSelection.pending {
+                let column = Int(cc - 16)
+                if bank.indices.contains(column), bank[column] == pending.slot {
+                    studioSelection.turn(slot: pending.slot, value: value)
+                    return
+                }
+            }
+        }
         guard
             let action = SurfaceMapping.action(
                 cc: cc, value: value, docks: windowPlacement.docks ?? [:], bank: bank,
                 page: activeKnobPage ?? rotoPage)
         else { return }
         switch action {
+        case .selectInput(let index):
+            pressStudioSelect(index)
         case .gain(let index, let gain):
             guard rack.slots.indices.contains(index) else { return }
             let slot = rack.slots[index]
@@ -1400,6 +1431,42 @@ final class AppState: ObservableObject {
             faceKnobs.handle(knob: seat, value127: Int(value))
             scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
         }
+    }
+
+    func studioKeyboardSlot(_ keyboard: StudioKeyboard) -> Int? {
+        switch keyboard {
+        case .numa: secondKeyboardSlot
+        case .keystage: synthInput1Slot
+        case .miniLab: miniLabSlot
+        }
+    }
+
+    func studioInputs(for index: Int) -> [StudioKeyboard] {
+        StudioKeyboard.allCases.filter { (studioKeyboardSlot($0) ?? rack.selected) == index }
+    }
+
+    func pressStudioSelect(_ index: Int) {
+        guard rack.slots.indices.contains(index) else { return }
+        // Read the current source before selecting: unbound keyboards follow selection.
+        let current = studioInputs(for: index).first
+        let commit = studioSelection.press(slot: index, current: current)
+        select(index)
+        if let commit {
+            switch commit.keyboard {
+            case .numa: secondKeyboardSlot = commit.slot
+            case .keystage: synthInput1Slot = commit.slot
+            case .miniLab: miniLabSlot = commit.slot
+            }
+        }
+    }
+
+    func stepStudioBank(_ direction: Int) {
+        let target = StudioTrackSelection.bankTarget(
+            selected: rack.selected, trackCount: rack.slots.count, direction: direction)
+        guard target != rack.selected else { return }
+        studioSelection.cancel()
+        surfaceGainPickup.reset()
+        select(target)
     }
 
     /// トラックの gain を直接設定する（Track 面のスライダー）
@@ -1619,6 +1686,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
@@ -1664,6 +1732,7 @@ final class AppState: ObservableObject {
                 }
                 if let synth = partial.synthInput1Slot { synthInput1Slot = synth }
                 if let second = partial.secondKeyboardSlot { secondKeyboardSlot = second }
+                if let mini = partial.miniLabSlot { miniLabSlot = mini }
                 if let jack = partial.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) {
                     lpd8KnobJack = jack
                 }
@@ -1838,6 +1907,19 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 secondController.handle(knob: Int(cc), value127: Int(value))
                 self?.scheduleAutosave()  // [常時保存 25] 鍵盤 2 の顔つまみ
+            }
+        }
+
+        let miniSlot = miniLabSlot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil } ?? slot
+        router.setSecondKeyboardTarget(miniSlot.audioUnit as? AVAudioUnitMIDIInstrument, input: .miniLab)
+        miniLabFaceKnobs.focus(miniSlot)
+        let miniCCs = Set(miniSlot.knobMappings.compactMap { UInt8(exactly: $0.knob) })
+            .intersection(secondReachable)
+        let miniController = miniLabFaceKnobs
+        router.setSecondKnobRouting(input: .miniLab, ccs: miniCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                miniController.handle(knob: Int(cc), value127: Int(value))
+                self?.scheduleAutosave()
             }
         }
 

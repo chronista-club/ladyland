@@ -126,6 +126,7 @@ struct RackSnapshot: Codable {
     /// 鍵盤 2（NCXse）の担当スロット（nil = 選択に追従。2nd キーボード計画 ②、
     /// 2026-08-10 追加 — mako「別々の二つの音源同時に弾きたい」）
     var secondKeyboardSlot: Int?
+    var miniLabSlot: Int?
 
     /// シンセ入力 1（Keystage）の担当スロット（spec/09 Jack。nil = 選択追従）
     var synthInput1Slot: Int?

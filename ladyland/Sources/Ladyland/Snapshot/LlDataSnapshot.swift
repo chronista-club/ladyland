@@ -42,6 +42,7 @@ struct LlDataSnapshot {
         var pedalInverted: Bool? = nil
         var synthInput1Slot: Int? = nil
         var secondKeyboardSlot: Int? = nil
+        var miniLabSlot: Int? = nil
         var keystage: String? = nil
         var rotoColors: String? = nil
         var tempoSync: Bool? = nil
@@ -105,6 +106,9 @@ struct LlDataSnapshot {
         }
         if let value = snapshot.secondKeyboardSlot {
             rack.children.append(KDLNode(name: "secondKeyboard", props: ["slot": .int(value)]))
+        }
+        if let value = snapshot.miniLabSlot {
+            rack.children.append(KDLNode(name: "miniLab", props: ["slot": .int(value)]))
         }
         if let value = snapshot.keystage {
             rack.children.append(KDLNode(name: "keystage", props: ["json": .string(value)]))
@@ -303,6 +307,7 @@ struct LlDataSnapshot {
                 pedalInverted: rack.child(named: "pedalInverted")?["value"]?.boolValue,
                 synthInput1Slot: rack.child(named: "synthInput1")?["slot"]?.intValue,
                 secondKeyboardSlot: rack.child(named: "secondKeyboard")?["slot"]?.intValue,
+                miniLabSlot: rack.child(named: "miniLab")?["slot"]?.intValue,
                 keystage: rack.child(named: "keystage")?["json"]?.stringValue,
                 rotoColors: rack.child(named: "rotoColors")?["json"]?.stringValue,
                 tempoSync: rack.child(named: "tempoSync")?["enabled"]?.boolValue,
@@ -394,6 +399,7 @@ struct LlDataSnapshot {
             snapshot.pedalInverted = globals.pedalInverted
             snapshot.synthInput1Slot = globals.synthInput1Slot
             snapshot.secondKeyboardSlot = globals.secondKeyboardSlot
+            snapshot.miniLabSlot = globals.miniLabSlot
             snapshot.keystage = globals.keystage
             snapshot.rotoColors = globals.rotoColors
             snapshot.tempoSync = globals.tempoSync
