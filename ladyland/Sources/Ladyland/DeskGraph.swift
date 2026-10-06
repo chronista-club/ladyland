@@ -52,6 +52,7 @@ enum DeskDropTarget: Equatable {
 enum DeskRebind: Equatable {
     case synth1(Int?)
     case synth2(Int?)
+    case miniLab(Int?)
     case lpd8Knobs(Lpd8KnobJack)
     case none
 }
@@ -64,6 +65,7 @@ enum DeskGraph {
         var selected: Int
         /// Track ノブの現ページ（0 始まり）
         var page: Int
+        var miniLab: Int? = nil
     }
 
     // MARK: - ソケット
@@ -115,7 +117,7 @@ enum DeskGraph {
                     kind = ""
                 }
             }
-            let repluggable = row.jack == .synth1 || row.jack == .synth2 || row.id == "lpd8.knobs"
+            let repluggable = row.jack == .synth1 || row.jack == .synth2 || row.jack == .miniLab || row.id == "lpd8.knobs"
             if let home {
                 put(
                     DeskSocket(
@@ -138,6 +140,7 @@ enum DeskGraph {
         switch jack {
         case .synth1: return .strip(b.synth1 ?? b.selected, follows: b.synth1 == nil)
         case .synth2: return .strip(b.synth2 ?? b.selected, follows: b.synth2 == nil)
+        case .miniLab: return .strip(b.miniLab ?? b.selected, follows: b.miniLab == nil)
         case .trackKnobs: return .strip(b.selected, follows: true)
         case .drums: return .drums
         }
@@ -149,7 +152,8 @@ enum DeskGraph {
         let name: String
         switch jack {
         case .synth1: name = "鍵盤 1"
-        case .synth2: name = "鍵盤 2"
+        case .synth2: name = "Numa"
+        case .miniLab: name = "MiniLab"
         case .trackKnobs: return "Track ノブ P\(b.page + 1)"
         case .drums: return "ドラム"
         }
@@ -188,6 +192,7 @@ enum DeskGraph {
         switch socket.jack {
         case .synth1: return .synth1(slot)
         case .synth2: return .synth2(slot)
+        case .miniLab: return .miniLab(slot)
         case .trackKnobs, .drums: return .none
         }
     }

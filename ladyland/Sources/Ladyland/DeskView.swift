@@ -53,7 +53,7 @@ struct DeskView: View {
         DeskGraph.Bindings(
             synth1: appState.synthInput1Slot, synth2: appState.secondKeyboardSlot,
             selected: appState.rack.selected,
-            page: appState.activeKnobPage ?? appState.rotoPage)
+            page: appState.activeKnobPage ?? appState.rotoPage, miniLab: appState.miniLabSlot)
     }
 
     private var bank: [Int] {
@@ -227,7 +227,7 @@ struct DeskView: View {
     static func color(_ jack: JackBoardView.JackID, _ theme: CreoTheme) -> Color {
         switch jack {
         case .synth1: return theme.brandPrimary
-        case .synth2: return theme.brandSecondary
+        case .synth2, .miniLab: return theme.brandSecondary
         case .trackKnobs: return theme.semanticInfo
         case .drums: return theme.semanticWarning
         }
@@ -341,7 +341,13 @@ struct DeskView: View {
             Button("ドラム") { apply(.lpd8Knobs(.drums)) }
             Button("Track ノブ") { apply(.lpd8Knobs(.face)) }
         } else {
-            let fix: (Int?) -> DeskRebind = socket.jack == .synth2 ? { .synth2($0) } : { .synth1($0) }
+            let fix: (Int?) -> DeskRebind = { slot in
+                switch socket.jack {
+                case .synth2: .synth2(slot)
+                case .miniLab: .miniLab(slot)
+                default: .synth1(slot)
+                }
+            }
             Button("選択に追従") { apply(fix(nil)) }
             ForEach(appState.rack.slots, id: \.index) { track in
                 Button(JackBoardView.trackLabel(index: track.index, name: track.trackName ?? "")) {
@@ -355,6 +361,7 @@ struct DeskView: View {
         switch rebind {
         case .synth1(let slot): appState.synthInput1Slot = slot
         case .synth2(let slot): appState.secondKeyboardSlot = slot
+        case .miniLab(let slot): appState.miniLabSlot = slot
         case .lpd8Knobs(let jack): appState.lpd8KnobJack = jack
         case .none: break
         }

@@ -359,11 +359,18 @@ final class MIDIRouter: @unchecked Sendable {
     // 「別々の二つの音源同時に弾きたい」）
 
     /// 鍵盤 2 の送り先（① は選択スロットと同じ。② で独立した席の選択を足す）
-    private var secondKeyboardTarget: AVAudioUnitMIDIInstrument?
+    enum AuxiliaryKeyboard: Hashable, Sendable { case numa, miniLab }
+    private struct AuxiliaryState {
+        var target: AVAudioUnitMIDIInstrument?
+        var held: Set<UInt16> = []
+        var ccs: Set<UInt8> = []
+        var handler: (@Sendable (UInt8, UInt8) -> Void)?
+    }
+    private var auxiliary: [AuxiliaryKeyboard: AuxiliaryState] = [:]
 
     /// 鍵盤 2 で押下中のノート（ch << 8 | note）。
     /// 送り先が替わるとき**旧スロットへ自分で消しに行く**ための帳簿
-    private var secondHeld: Set<UInt16> = []
+
 
     /// この受信を楽器へ通すか（純関数 — テスト対象）。
     ///
@@ -398,25 +405,24 @@ final class MIDIRouter: @unchecked Sendable {
     /// 鍵盤 2 が届く席の割当（ModWheel 116 / ダンパー 64 / スティック 74）と
     /// 駆動先。担当スロットが選択と割れても正しい割当を見るために keyboard の
     /// `knobCCs` とは別に持つ
-    private var secondKnobCCs: Set<UInt8> = []
-    private var secondKnobHandler: (@Sendable (UInt8, UInt8) -> Void)?
 
-    func setSecondKnobRouting(ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+
+    func setSecondKnobRouting(input: AuxiliaryKeyboard = .numa, ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
         lock.lock(); defer { lock.unlock() }
-        secondKnobCCs = ccs
-        secondKnobHandler = handler
+        auxiliary[input, default: AuxiliaryState()].ccs = ccs
+        auxiliary[input, default: AuxiliaryState()].handler = handler
     }
 
-    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?) {
+    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?, input: AuxiliaryKeyboard = .numa) {
         lock.lock()
-        guard unit !== secondKeyboardTarget else {
+        guard unit !== auxiliary[input]?.target else {
             lock.unlock()
             return
         }
-        let previous = secondKeyboardTarget
-        let orphaned = secondHeld
-        secondHeld = []
-        secondKeyboardTarget = unit
+        let previous = auxiliary[input]?.target
+        let orphaned = auxiliary[input]?.held ?? []
+        auxiliary[input, default: AuxiliaryState()].held = []
+        auxiliary[input, default: AuxiliaryState()].target = unit
         lock.unlock()
         // 宙に浮くノートは旧スロットへ自分で消しに行く（keyboard 経路と同じ作法）
         for key in orphaned {
@@ -424,26 +430,31 @@ final class MIDIRouter: @unchecked Sendable {
         }
     }
 
-    func routeSecondKeyboard(_ status: UInt8, _ rawData1: UInt8, _ data2: UInt8) {
+    func routeSecondKeyboard(_ status: UInt8, _ rawData1: UInt8, _ data2: UInt8, input: AuxiliaryKeyboard = .numa) {
         // ⭐ まず内部モデルへ翻訳（CC1 → ModWheel 席）。以降は翻訳後の値だけを扱う
         let data1 = Self.secondKeyboardTranslated(status: status, data1: rawData1)
         lock.lock()
-        let target = secondKeyboardTarget
+        let state = auxiliary[input] ?? AuxiliaryState()
+        let target = state.target
         let trace = traceHandler
-        let handler = secondKnobHandler
-        let captured = status & 0xF0 == 0xB0 && secondKnobCCs.contains(data1)
+        let handler = state.handler
+        let captured = status & 0xF0 == 0xB0 && state.ccs.contains(data1)
         let forwards = Self.secondKeyboardForwards(status: status, data1: data1)
         if forwards, !captured {
             let key = UInt16(status & 0x0F) << 8 | UInt16(data1)
             switch status & 0xF0 {
-            case 0x90 where data2 > 0: secondHeld.insert(key)
-            case 0x80, 0x90: secondHeld.remove(key)
+            case 0x90 where data2 > 0: auxiliary[input, default: AuxiliaryState()].held.insert(key)
+            case 0x80, 0x90: auxiliary[input, default: AuxiliaryState()].held.remove(key)
             default: break
             }
         }
         lock.unlock()
         // trace は翻訳後（ログに CC116 = ModWheel と出る — 席の言葉で読める）
-        trace?(.secondKeyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        if input == .miniLab {
+            trace?(.miniLab(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        } else {
+            trace?(.secondKeyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        }
         // ⭐ ModWheel 席などに割当があれば内部モデル操作（= パラメータ駆動）へ。
         // 割当は**担当スロットのもの**（`secondKnobCCs` — 選択と割れても正しい席）
         if captured, let handler {
@@ -1019,8 +1030,9 @@ enum MIDISourceRoute: Equatable, Sendable {
     case genericKeyboard
     /// LPD8 → drums 経路
     case drums
-    /// MiniLab / NCXse / （Keystage が居るときの）汎用鍵盤 → 鍵盤 2 経路
+    /// NCXse / （Keystage が居るときの）汎用鍵盤 → 鍵盤 2 経路
     case secondKeyboard
+    case miniLab
     /// 操作面（nanoKONTROL2）→ surface 経路。CC の意味は**机で載せた部品**が
     /// 決める（`SurfaceMapping`。mako 2026-10-04「ナノコントロール 2 の上に
     /// ミキサーを置く」）。鍵盤扱いしない — フェーダーの CC0-7 は Keystage の席と
@@ -1122,8 +1134,9 @@ final class MIDIInput {
         // あって Keystage の席ではない。実測 2026-08-10）ので、経路ごと分ける
         status = MIDIInputPortCreateWithProtocol(
             client, "secondKeyboard" as CFString, ._1_0, &secondKeyboardPort
-        ) { eventList, _ in
-            Self.handle(eventList, route: { routerRef.routeSecondKeyboard($0, $1, $2) })
+        ) { eventList, context in
+            let input: MIDIRouter.AuxiliaryKeyboard = context == nil ? .numa : .miniLab
+            Self.handle(eventList, route: { routerRef.routeSecondKeyboard($0, $1, $2, input: input) })
         }
         guard status == noErr else { throw MIDIError.portCreate(status) }
 
@@ -1153,7 +1166,7 @@ final class MIDIInput {
         // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
         // 全 25 鍵の健全性は実測済み（2026-08-22 スニファ 2 周 —
         // 「鍵盤 2 つ壊れてそう」は配線されていなかっただけ）
-        if name.contains("MiniLab") { return .secondKeyboard }
+        if name.contains("MiniLab") { return .miniLab }
         if name.contains("NCXse") {
             // ⚠️ `-controller` は**意図的に繋がない** — スティックとベンドが
             // ch1/ch2 へ複製されて二重に届くうえ、音量ノブ（CC7）と掃除
@@ -1219,6 +1232,9 @@ final class MIDIInput {
             case .drums:
                 MIDIPortConnectSource(drumsPort, source, nil)
                 connectedSources.append("\(name) → drums")
+            case .miniLab:
+                MIDIPortConnectSource(secondKeyboardPort, source, UnsafeMutableRawPointer(bitPattern: 1))
+                connectedSources.append("\(name) → MiniLab")
             case .secondKeyboard:
                 MIDIPortConnectSource(secondKeyboardPort, source, nil)
                 connectedSources.append("\(name) → 鍵盤2")

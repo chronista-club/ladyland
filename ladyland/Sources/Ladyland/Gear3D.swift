@@ -251,6 +251,7 @@ enum DockModel {
 enum SurfaceAction: Equatable {
     case gain(slot: Int, value: Float)
     case toggleMute(slot: Int)
+    case selectInput(slot: Int)
     case trackKnob(seat: Int, value: UInt8)
 }
 
@@ -265,6 +266,11 @@ enum SurfaceMapping {
             if let i = faders.ccs.firstIndex(of: cc) {
                 guard bank.indices.contains(i) else { return nil }
                 return .gain(slot: bank[i], value: Float(value) / 127)
+            }
+            if id == "nanokontrol.faders", (32..<40).contains(cc) {
+                let i = Int(cc - 32)
+                guard value > 0, bank.indices.contains(i) else { return nil }
+                return .selectInput(slot: bank[i])
             }
             let gear = id.split(separator: ".").first.map(String.init) ?? ""
             if let mutes = GearBlueprint.section(id: "\(gear).mutes"),

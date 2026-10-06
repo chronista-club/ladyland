@@ -93,7 +93,7 @@ struct DeskCableTests {
     func labels() {
         let bank = Array(0..<8)
         #expect(DeskGraph.plugLabel(.synth1, bindings, bank: bank) == "鍵盤 1 · 追従")
-        #expect(DeskGraph.plugLabel(.synth2, bindings, bank: bank) == "鍵盤 2 → T28", "バンク外は席番号")
+        #expect(DeskGraph.plugLabel(.synth2, bindings, bank: bank) == "Numa → T28", "バンク外は席番号")
         #expect(DeskGraph.plugLabel(.trackKnobs, bindings, bank: bank) == "Track ノブ P3")
         #expect(DeskGraph.plugLabel(.drums, bindings, bank: bank) == "ドラム")
         let fixedInBank = DeskGraph.Bindings(synth1: 5, synth2: nil, selected: 2, page: 0)

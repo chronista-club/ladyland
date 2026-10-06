@@ -198,6 +198,13 @@ final class RackDatabase: @unchecked Sendable {
             }
         }
 
+        migrator.registerMigration("v13-minilab-slot") { db in
+            try db.alter(table: "rackState") { t in
+                t.add(column: "miniLabSlot", .integer)
+            }
+            // Preserve the old shared binding when opening an existing rack.
+            try db.execute(sql: "UPDATE rackState SET miniLabSlot = secondKeyboardSlot")
+        }
         return migrator
     }
 
@@ -406,6 +413,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
     var pedalInverted: Bool?
     var synthInput1Slot: Int?
     var secondKeyboardSlot: Int?
+    var miniLabSlot: Int?
     /// Keystage の ARP / CHORD 設定（JSON。KeystageSettings をそのまま符号化）
     var keystage: String?
     /// ROTO の配色（JSON）
@@ -431,6 +439,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         pedalInverted = snapshot.pedalInverted
         synthInput1Slot = snapshot.synthInput1Slot
         secondKeyboardSlot = snapshot.secondKeyboardSlot
+        miniLabSlot = snapshot.miniLabSlot
         keystage = snapshot.keystage
         rotoColors = snapshot.rotoColors
         theme = snapshot.theme
@@ -449,6 +458,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.keystage = keystage
         snapshot.rotoColors = rotoColors
         snapshot.theme = theme
