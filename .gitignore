@@ -46,3 +46,8 @@ npm-debug.log*
 *.dmg
 .claude/worktrees/
 field/vision/LadylandField.xcodeproj/
+
+# Blender automatic backups and Python caches
+*.blend[0-9]*
+**/__pycache__/
+assets/blender/renders/
