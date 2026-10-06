@@ -7,7 +7,10 @@
 //!     載せた / 外したときだけ、LPD8 のノブの刺し先も切り替わる
 
 import Foundation
+import CreoUI
+import RealityKit
 import Testing
+import simd
 
 @testable import Ladyland
 
@@ -28,7 +31,7 @@ struct DeskLayoutModelTests {
     func noOverlap() {
         let rects = layout.gear.map { ($0.id, $0.footprint) }
         for i in rects.indices {
-            #expect(layout.deskRect.contains(rects[i].1), "\(rects[i].0) が机からはみ出す")
+            #expect(layout.supportSurfaces.contains { abs($0.elevation - layout.gear[i].elevation) < 0.1 && $0.footprint.insetBy(dx: -0.1, dy: -0.1).contains(rects[i].1) }, "\(rects[i].0) が机からはみ出す")
             for j in rects.indices where j > i {
                 #expect(!rects[i].1.intersects(rects[j].1), "\(rects[i].0) と \(rects[j].0) が重なる")
             }
@@ -41,6 +44,114 @@ struct DeskLayoutModelTests {
             let spot = CGRect(x: point.x - 110, y: point.y - 25, width: 220, height: 50)
             #expect(!layout.gear.contains { $0.footprint.intersects(spot) })
         }
+    }
+}
+
+@Suite("3D の studio — 棚と向き")
+struct StudioLayoutTests {
+    static let json = #"""
+    {"desk":{"center":[0,0],"size":[2400,1800]},
+     "gear":[{"id":"nanokontrol","center":[-1025,20],"size":[325,83],
+              "elevation":740,"yaw":90}],
+     "tray":{"mixer":[0,-680],"trackKnobs":[250,-680]},"trayElevation":850,
+     "camera":{"from":[0,2200,2300],"at":[0,740,0],"fov":40,
+               "projection":"orthographic","orthographicScale":2800}}
+    """#
+
+    @Test("横向きの機材は幅と奥行きが入れ替わる")
+    func rotatedFootprint() throws {
+        let entry = try #require(DeskLayout.decode(Data(Self.json.utf8)).gear.first)
+        #expect(abs(entry.footprint.width - 83) < 0.001)
+        #expect(abs(entry.footprint.height - 325) < 0.001)
+        #expect(entry.footprint.midX == -1025)
+        #expect(entry.footprint.midY == 20)
+    }
+
+    @Test("高さ・カメラ・仮想部品の置き場を読み込む")
+    func elevations() throws {
+        let layout = try DeskLayout.decode(Data(Self.json.utf8))
+        #expect(layout.gear[0].pose.position == SIMD3<Float>(-1.025, 0.74, 0.02))
+        #expect(layout.orthographicScale == 2.8)
+        #expect(simd_distance(layout.trayPosition(.mixer), [0, 0.854, -0.68]) < 1e-6)
+    }
+
+    @Test("旧配置の高さと回転は 0、透視投影のまま")
+    func legacy() throws {
+        let json = #"""
+        {"desk":{"center":[0,0],"size":[900,420]},
+         "gear":[{"id":"nanokontrol","center":[0,0],"size":[325,83]}],
+         "tray":{"mixer":[0,115]},"camera":{"from":[0,330,370],"at":[0,10,45],"fov":40}}
+        """#
+        let layout = try DeskLayout.decode(Data(json.utf8))
+        #expect(layout.gear[0].pose.position == .zero)
+        #expect(layout.gear[0].yaw == 0)
+        #expect(layout.orthographicScale == nil)
+        #expect(layout.supportSurfaces[0].elevation == 0)
+        #expect(layout.trayPosition(.mixer).y == 0.004)
+    }
+
+    @Test("回転後のノブ列を狙うと載る。回転前の場所には載らない")
+    func rotatedDock() throws {
+        let entry = try DeskLayout.decode(Data(Self.json.utf8)).gear[0]
+        let gear = entry.placing(.nanoKontrol2)
+        let knobs = try #require(gear.blueprint.sections.first { $0.kind == .knobs })
+        let local = CGPoint(x: 100, y: -27.3)
+        let world = gear.pose.worldPoint(local)
+        #expect(DockModel.section(for: .trackKnobs, at: world, gears: [gear]) == knobs)
+        let unrotated = CGPoint(x: gear.origin.x + local.x, y: gear.origin.y + local.y)
+        #expect(DockModel.section(for: .trackKnobs, at: unrotated, gears: [gear]) == nil)
+        let inverse = gear.pose.localPoint(world)
+        #expect(abs(inverse.x - local.x) < 0.001 && abs(inverse.y - local.y) < 0.001)
+    }
+
+    @Test("高い棚の回転したノブ列へ光線を投影する")
+    func raisedDrop() throws {
+        let gear = try DeskLayout.decode(Data(Self.json.utf8)).gear[0].placing(.nanoKontrol2)
+        let point = gear.pose.worldPoint(CGPoint(x: 100, y: -27.3))
+        let origin = SIMD3<Float>(Float(point.x) / 1000, 2, Float(point.y) / 1000)
+        let target = try #require(Desk3DMath.dropTarget(for: .trackKnobs, origin: origin, direction: [0, -1, 0], gears: [gear]))
+        #expect(target.section.id == "nanokontrol.knobs")
+        #expect(abs(target.point.y - gear.top) < 1e-6)
+        #expect(Desk3DMath.dropTarget(for: .trackKnobs, origin: [5, 2, 5], direction: [0, -1, 0], gears: [gear]) == nil)
+    }
+
+    @MainActor @Test("書き出した studio の実資産が高さ・回転・操作子を保つ")
+    func exportedAssets() async throws {
+        guard let path = ProcessInfo.processInfo.environment["LADYLAND_STUDIO_ASSETS"] else { return }
+        let scene = Desk3DScene(gearDirectory: URL(fileURLWithPath: path))
+        let root = await scene.build(theme: .mintDark)
+        #expect(root.findEntity(named: "environment") != nil)
+        for entry in scene.layout.gear {
+            let entity = try #require(root.findEntity(named: entry.id))
+            let bounds = entity.visualBounds(relativeTo: root)
+            #expect(abs(bounds.min.y - entry.elevation / 1000) < 0.002)
+            #expect(abs(bounds.extents.x - Float(entry.footprint.width) / 1000) < 0.003)
+            #expect(abs(bounds.extents.z - Float(entry.footprint.height) / 1000) < 0.003)
+        }
+        let nano = try #require(root.findEntity(named: "nanokontrol"))
+        #expect(nano.findEntity(named: "fader_1") != nil)
+        #expect(nano.findEntity(named: "m_1") != nil)
+    }
+
+    @MainActor @Test("RealityKit の機材・帯・カメラも棚の高さと向きを保つ")
+    func scenePose() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(Self.json.utf8).write(to: directory.appendingPathComponent("desk_layout.json"))
+        let scene = Desk3DScene(gearDirectory: directory)
+        let root = await scene.build(theme: .mintDark)
+        let gear = try #require(root.findEntity(named: "nanokontrol"))
+        #expect(simd_distance(gear.position, [-1.025, 0.74, 0.02]) < 1e-5)
+        #expect(simd_distance(gear.orientation.act([0, 0, -1]), [-1, 0, 0]) < 1e-5)
+        let camera = try #require(root.children.first { $0.components[OrthographicCameraComponent.self] != nil })
+        #expect(camera.components[OrthographicCameraComponent.self]?.scale == 2.8)
+        let tray = try #require(root.findEntity(named: "virtual.mixer"))
+        #expect(abs(tray.position.y - 0.854) < 1e-5)
+        let wrap = try #require(scene.wrapEntity(.mixer, section: "nanokontrol.faders"))
+        let bounds = wrap.visualBounds(relativeTo: nil)
+        #expect(bounds.min.y >= 0.739 && bounds.max.y < 0.79, "帯は床から伸ばさず、機材だけを包む")
+        #expect(bounds.extents.x < 0.1 && bounds.extents.z > 0.32, "帯も機材と一緒に回転する")
     }
 }
 
