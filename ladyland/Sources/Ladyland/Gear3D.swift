@@ -395,6 +395,7 @@ struct DeskLayout {
     var cameraUp: SIMD3<Float> = [0, 1, 0]
     var orthographicScale: Float? = nil
     var cameraScaleIsHorizontal = true
+    var cameraAspectRatio: Float? = nil
 
     var supportSurfaces: [Surface] {
         surfaces.isEmpty ? [Surface(center: deskCenter, size: deskSize, elevation: 0, thickness: 10)] : surfaces
@@ -422,7 +423,7 @@ struct DeskLayout {
         }
         struct Camera: Decodable {
             let from: [Float]; let at: [Float]; let fov: Float
-            let up: [Float]?; let projection: String?; let orthographicScale: Float?; let scaleDirection: String?
+            let up: [Float]?; let projection: String?; let orthographicScale: Float?; let scaleDirection: String?; let aspectRatio: Float?
         }
         let desk: Desk
         let gear: [Gear]
@@ -452,7 +453,7 @@ struct DeskLayout {
             trayElevation: j.trayElevation ?? 0,
             cameraUp: j.camera.up.map { SIMD3($0[0], $0[1], $0[2]) } ?? [0, 1, 0],
             orthographicScale: j.camera.projection == "orthographic" ? j.camera.orthographicScale.map { $0 / 1000 } : nil,
-            cameraScaleIsHorizontal: j.camera.scaleDirection != "vertical")
+            cameraScaleIsHorizontal: j.camera.scaleDirection != "vertical", cameraAspectRatio: j.camera.aspectRatio)
     }
 
     /// 並びが見つからないとき — nanoKONTROL2 だけを机の真ん中に

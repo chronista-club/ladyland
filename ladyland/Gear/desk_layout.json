@@ -195,6 +195,7 @@
       4580.48
     ],
     "orthographicScale": 3100.0,
-    "scaleDirection": "horizontal"
+    "scaleDirection": "horizontal",
+    "aspectRatio": 1.25
   }
 }

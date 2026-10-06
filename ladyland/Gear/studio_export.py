@@ -102,6 +102,7 @@ def layout_from_scene(scene):
                   fov=round(math.degrees(cam.data.angle_y), 4),
                   projection="orthographic" if cam.data.type == "ORTHO" else "perspective")
     camera["from"] = camera.pop("from_")
+    camera["aspectRatio"] = scene.render.resolution_x * scene.render.pixel_aspect_x / (scene.render.resolution_y * scene.render.pixel_aspect_y)
     if cam.data.type == "ORTHO":
         camera["orthographicScale"] = round(cam.data.ortho_scale * 1000, 3)
         horizontal = scene.render.resolution_x * scene.render.pixel_aspect_x >= scene.render.resolution_y * scene.render.pixel_aspect_y

@@ -75,6 +75,13 @@ enum Desk3DMath {
         CGPoint(x: CGFloat((point.x * 1000).rounded()), y: CGFloat((point.z * 1000).rounded()))
     }
 
+    /// Blender は撮影範囲の全幅、RealityKit は半幅。縦横比が違えば撮影範囲全体を収める。
+    static func cameraScale(span: Float, horizontal: Bool, sourceAspect: Float?, viewport: CGSize) -> Float {
+        guard let sourceAspect, sourceAspect > 0, viewport.width > 0, viewport.height > 0 else { return span / 2 }
+        let aspect = Float(viewport.width / viewport.height)
+        return span / 2 * (horizontal ? max(1, aspect / sourceAspect) : max(1, sourceAspect / aspect))
+    }
+
     /// 高さの違う棚へ同じ水平面で投影すると、見えている操作子からドロップがずれる。
     /// 各機材の天面へ投影し、手前の載せ先を選ぶ。
     static func dropTarget(
@@ -95,42 +102,46 @@ struct Desk3DView: View {
     @State private var scene = Desk3DScene()
 
     var body: some View {
-        RealityView { [weak appState] content in
-            let root = await scene.build(theme: theme)
-            content.add(root)
-            scene.subscription = content.subscribe(to: SceneEvents.Update.self) { [weak appState] _ in
-                guard let appState else { return }
-                scene.tick(appState: appState)
+        GeometryReader { [appState] geometry in
+            RealityView { [weak appState] content in
+                let root = await scene.build(theme: theme)
+                scene.resizeCamera(to: geometry.size)
+                content.add(root)
+                scene.subscription = content.subscribe(to: SceneEvents.Update.self) { [weak appState] _ in
+                    guard let appState else { return }
+                    scene.tick(appState: appState)
+                }
             }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .targetedToAnyEntity()
-                .onChanged { value in
-                    guard let component = Desk3DScene.component(of: value.entity),
-                        let ray = value.ray(through: value.location, in: .local, to: .scene)
-                    else { return }
-                    scene.drag(component, origin: ray.origin, direction: ray.direction)
-                }
-                .onEnded { value in
-                    guard let component = Desk3DScene.component(of: value.entity) else { return }
-                    let section = scene.dragSection(component)
-                    let before = appState.windowPlacement.docks?[component.rawValue]
-                    appState.windowPlacement.setDock(component, on: section)
-                    // LPD8 のノブ列に Track ノブを載せる = LPD8 のノブを Track ノブへ刺す
-                    if component == .trackKnobs,
-                        let jack = DockModel.lpd8Jack(before: before, after: section)
-                    {
-                        appState.lpd8KnobJack = jack
+            .onChange(of: geometry.size) { _, size in scene.resizeCamera(to: size) }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .targetedToAnyEntity()
+                    .onChanged { value in
+                        guard let component = Desk3DScene.component(of: value.entity),
+                            let ray = value.ray(through: value.location, in: .local, to: .scene)
+                        else { return }
+                        scene.drag(component, origin: ray.origin, direction: ray.direction)
                     }
-                    scene.endDrag(component)
-                }
-        )
-        .overlay(alignment: .bottomLeading) {
-            Text("部品を掴んで機材の上へ。合う場所にだけ載る（外すときは手前へ）")
-                .font(LadylandFont.deskCaption)
-                .foregroundColor(theme.textTertiary)
-                .padding(CreoUITokens.spacingS)
+                    .onEnded { value in
+                        guard let component = Desk3DScene.component(of: value.entity) else { return }
+                        let section = scene.dragSection(component)
+                        let before = appState.windowPlacement.docks?[component.rawValue]
+                        appState.windowPlacement.setDock(component, on: section)
+                        // LPD8 のノブ列に Track ノブを載せる = LPD8 のノブを Track ノブへ刺す
+                        if component == .trackKnobs,
+                            let jack = DockModel.lpd8Jack(before: before, after: section)
+                        {
+                            appState.lpd8KnobJack = jack
+                        }
+                        scene.endDrag(component)
+                    }
+            )
+            .overlay(alignment: .bottomLeading) {
+                Text("部品を掴んで機材の上へ。合う場所にだけ載る（外すときは手前へ）")
+                    .font(LadylandFont.deskCaption)
+                    .foregroundColor(theme.textTertiary)
+                    .padding(CreoUITokens.spacingS)
+            }
         }
     }
 }
@@ -271,7 +282,7 @@ final class Desk3DScene {
         camera.name = "studio.camera"
         if let scale = layout.orthographicScale {
             var lens = OrthographicCameraComponent()
-            lens.scale = scale
+            lens.scale = scale / 2
             lens.scaleDirection = layout.cameraScaleIsHorizontal ? .horizontal : .vertical
             lens.near = 0.01
             lens.far = 100
@@ -282,6 +293,14 @@ final class Desk3DScene {
         camera.look(at: layout.cameraAt, from: layout.cameraFrom, upVector: layout.cameraUp, relativeTo: nil)
         root.addChild(camera)
         return root
+    }
+
+    func resizeCamera(to viewport: CGSize) {
+        guard let span = layout.orthographicScale, let camera = root.findEntity(named: "studio.camera"),
+              var lens = camera.components[OrthographicCameraComponent.self] else { return }
+        lens.scale = Desk3DMath.cameraScale(span: span, horizontal: layout.cameraScaleIsHorizontal,
+                                           sourceAspect: layout.cameraAspectRatio, viewport: viewport)
+        camera.components.set(lens)
     }
 
     /// Blender から来る資産の置き場（`Gear/*.py` が書く）

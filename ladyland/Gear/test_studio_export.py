@@ -67,6 +67,7 @@ class StudioExportTests(unittest.TestCase):
         self.assertEqual(layout["camera"]["from"], [0, 2000, 3000])
         self.assertEqual(layout["camera"]["projection"], "orthographic")
         self.assertEqual(layout["camera"]["orthographicScale"], 3000)
+        self.assertEqual(layout["camera"]["aspectRatio"], 1.25)
         self.assertEqual(layout["camera"]["scaleDirection"], "horizontal")
 
     def test_tilt_and_scale_are_rejected_instead_of_silently_flattened(self):

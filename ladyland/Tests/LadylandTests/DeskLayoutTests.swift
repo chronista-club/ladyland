@@ -55,7 +55,7 @@ struct StudioLayoutTests {
               "elevation":740,"yaw":90}],
      "tray":{"mixer":[0,-680],"trackKnobs":[250,-680]},"trayElevation":850,
      "camera":{"from":[0,2200,2300],"at":[0,740,0],"fov":40,
-               "projection":"orthographic","orthographicScale":2800}}
+               "projection":"orthographic","orthographicScale":2800,"aspectRatio":1.25}}
     """#
 
     @Test("横向きの機材は幅と奥行きが入れ替わる")
@@ -104,6 +104,13 @@ struct StudioLayoutTests {
         #expect(abs(inverse.x - local.x) < 0.001 && abs(inverse.y - local.y) < 0.001)
     }
 
+    @Test("画面比が変わっても Blender の撮影範囲を切らない")
+    func cameraFit() {
+        #expect(Desk3DMath.cameraScale(span: 3.1, horizontal: true, sourceAspect: 1.25, viewport: CGSize(width: 1250, height: 1000)) == 1.55)
+        #expect(abs(Desk3DMath.cameraScale(span: 3.1, horizontal: true, sourceAspect: 1.25, viewport: CGSize(width: 2000, height: 1000)) - 2.48) < 1e-5)
+        #expect(Desk3DMath.cameraScale(span: 3.1, horizontal: true, sourceAspect: 1.25, viewport: CGSize(width: 1000, height: 1000)) == 1.55)
+    }
+
     @Test("高い棚の回転したノブ列へ光線を投影する")
     func raisedDrop() throws {
         let gear = try DeskLayout.decode(Data(Self.json.utf8)).gear[0].placing(.nanoKontrol2)
@@ -145,7 +152,9 @@ struct StudioLayoutTests {
         #expect(simd_distance(gear.position, [-1.025, 0.74, 0.02]) < 1e-5)
         #expect(simd_distance(gear.orientation.act([0, 0, -1]), [-1, 0, 0]) < 1e-5)
         let camera = try #require(root.children.first { $0.components[OrthographicCameraComponent.self] != nil })
-        #expect(camera.components[OrthographicCameraComponent.self]?.scale == 2.8)
+        #expect(camera.components[OrthographicCameraComponent.self]?.scale == 1.4)
+        scene.resizeCamera(to: CGSize(width: 2000, height: 1000))
+        #expect(abs((camera.components[OrthographicCameraComponent.self]?.scale ?? 0) - 2.24) < 1e-5)
         let tray = try #require(root.findEntity(named: "virtual.mixer"))
         #expect(abs(tray.position.y - 0.854) < 1e-5)
         let wrap = try #require(scene.wrapEntity(.mixer, section: "nanokontrol.faders"))
