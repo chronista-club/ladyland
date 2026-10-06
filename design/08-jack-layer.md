@@ -41,6 +41,12 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1h. **X-TOUCH を追加(2026-10-06)**: 標準の 452 × 301 × 100 mm モデル。
+    `Gear/xtouch.json` に 8 チャンネル＋マスターの 100 mm フェーダー、8 エンコーダー、
+    液晶、メーター、トランスポート、ジョグを定義する。筐体の傾斜と背面端子は簡略化。
+    机を横に広げて左側へ置く。フェーダー 8 本とノブ 8 個は別セクションとし、
+    MCU/HUI の MIDI 制御は接続しない（CC は空）。生成した `.blend` はレポ外の
+    `~/Documents/Blender/`、USDZ はアプリの Application Support に置く。
 1g. **机に 7 台(2026-10-05、mako「3D の机に全部載せて」)**: 並びは `Gear/desk_layout.json`
     (アプリと Blender の両方が読む。机の大きさ・各機材の中心・部品の置き場・カメラ)。
     `gear_build.py` は USDZ と一緒に配置データ(JSON、鍵盤は展開済み)を書き出し、アプリは

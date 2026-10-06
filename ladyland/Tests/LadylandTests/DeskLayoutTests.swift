@@ -1,7 +1,7 @@
 //! 3D の机に全部載せる（mako 2026-10-05「3D の机に全部載せて」）。
 //!
 //! 守りたい不変条件:
-//!   - 並び（`Gear/desk_layout.json`）は 7 台を重ならずに机の上へ置く
+//!   - 並び（`Gear/desk_layout.json`）は 8 台を重ならずに机の上へ置く
 //!   - Blender が書き出す配置データ（JSON）から部品とセクションを読める
 //!   - Track ノブは 8 本以上のノブ列ならどの機材にも載る。LPD8 のノブ列に
 //!     載せた / 外したときだけ、LPD8 のノブの刺し先も切り替わる
@@ -19,9 +19,9 @@ private let repoGear = URL(fileURLWithPath: #filePath)
 struct DeskLayoutModelTests {
     let layout = try! DeskLayout.decode(Data(contentsOf: repoGear.appendingPathComponent("desk_layout.json")))
 
-    @Test("7 台が並ぶ")
+    @Test("8 台が並ぶ")
     func gears() {
-        #expect(Set(layout.gear.map(\.id)) == ["roto", "nanokontrol", "lpd8", "minilab", "fgdp50", "keystage", "ncxse"])
+        #expect(Set(layout.gear.map(\.id)) == ["roto", "nanokontrol", "lpd8", "minilab", "fgdp50", "keystage", "ncxse", "xtouch"])
     }
 
     @Test("どの 2 台も重ならず、全部机の上")
@@ -74,9 +74,20 @@ struct GearBlueprintJSONTests {
         #expect(b.sections.first { $0.id == "x.pads" }?.kind == .pads)
     }
 
+    @Test("X-TOUCH は 8 チャンネルと独立したマスターフェーダーを持つ")
+    func xtouch() throws {
+        let b = try GearBlueprint.decode(Data(contentsOf: repoGear.appendingPathComponent("xtouch.json")))
+        #expect(b.size == SIMD3<Float>(452, 100, 301))
+        #expect(b.parts.filter { $0.kind == .fader }.count == 9)
+        #expect(b.parts.filter { $0.kind == .fader }.allSatisfy { $0.travel == 100 })
+        #expect(b.sections.first { $0.id == "xtouch.faders" }?.parts.count == 8)
+        #expect(b.sections.first { $0.id == "xtouch.encoders" }?.parts.count == 8)
+        #expect(b.sections.allSatisfy { $0.ccs.isEmpty }, "MCU の制御を汎用 CC として捏造しない")
+    }
+
     @Test("repo の配置データは全部読める")
     func repoFiles() throws {
-        for id in ["lpd8", "keystage", "roto", "fgdp50", "ncxse", "minilab"] {
+        for id in ["lpd8", "keystage", "roto", "fgdp50", "ncxse", "minilab", "xtouch"] {
             let b = try GearBlueprint.decode(Data(contentsOf: repoGear.appendingPathComponent("\(id).json")))
             #expect(b.id == id)
             #expect(!b.sections.isEmpty)
