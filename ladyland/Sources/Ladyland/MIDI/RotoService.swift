@@ -256,8 +256,10 @@ final class RotoService {
         // 届いた `0B 13` を落としているらしい。面切替（`0B 01`）でも同じ理由で
         // 0.3 秒待っている。連打しても最後の 1 回が正しい内容を塗る
         // （`smartPage` は最新、`shadow.label` が重複を抑える）
+        let scheduledGeneration = workGate.stamp
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
+            guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration, !Task.isCancelled else { return }
             self?.projectFaces()
         }
     }
@@ -313,8 +315,10 @@ final class RotoService {
         // ⚠️ **送っただけ** — SMART は通知が無いので推定のまま
         assumeFace("SMART")
         shadow.invalidateSmartPage()
+        let scheduledGeneration = workGate.stamp
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
+            guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration, !Task.isCancelled else { return }
             self?.projectFaces()
         }
     }
@@ -342,7 +346,8 @@ final class RotoService {
     /// ROTO へ出ていく**唯一の口**（順序 + ペーシングは `RotoSendQueue` の領分）。
     /// SysEx は 5ms ペーシングで直列送信（公式 Ableton スクリプト準拠 —
     /// main をブロックしないよう専用キューで usleep する）
-    private let sender = RotoSendQueue()
+    nonisolated let workGate = MIDIWorkGate()
+    private lazy var sender = RotoSendQueue(gate: workGate)
 
     /// I/O デバッグ環境（mako 依頼 2026-08-11）: 仮想ポート「Ladyland RotoInject」。
     /// ここへ届いた MIDI/SysEx を **RotoSendQueue 経由で** ROTO へ中継する —
@@ -353,8 +358,26 @@ final class RotoService {
         self.rack = rack
     }
 
-    func start() {
-        connect()
+    func start() { connect() }
+
+    func acquireDevice() {
+        guard workGate.activate() else { return }
+        reconnect()
+    }
+    func releaseDevice() async {
+        workGate.revoke()
+        connected = false
+        destination = nil
+        handshakeDone = false
+        startupSettled = false
+        buttonHold?.task.cancel()
+        buttonHold = nil
+        for (param, token) in observed { param.removeParameterObserver(token) }
+        observed.removeAll()
+        midiSyncTimer?.invalidate(); midiSyncTimer = nil
+        midiRefreshTimer?.invalidate(); midiRefreshTimer = nil
+        if inputPort != 0 { MIDIPortDispose(inputPort); inputPort = 0 }
+        await workGate.waitUntilIdle()
     }
 
     /// 挿抜時（MIDIInput.onSetupChanged から）。宛先を引き直して握手からやり直す
@@ -384,8 +407,9 @@ final class RotoService {
     private func scheduleRescan() {
         guard let delay = MIDIRescan.delay(afterAttempt: rescanAttempt) else { return }
         rescanAttempt += 1
+        let stamp = workGate.stamp
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, !self.connected else { return }
+            guard let self, let stamp, self.workGate.stamp == stamp, !self.connected else { return }
             NSLog("roto: 再列挙 %d 回目（起動レースの救済）", self.rescanAttempt)
             self.connect()
         }
@@ -545,8 +569,10 @@ final class RotoService {
 
     private func armButtonHold(slot: Int) {
         buttonHold?.task.cancel()
+        let scheduledGeneration = workGate.stamp
         let task = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(Self.buttonHoldSeconds))
+            guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration else { return }
             guard !Task.isCancelled else { return }
             self?.buttonHold = nil
             self?.jumpToInstBook()
@@ -564,7 +590,10 @@ final class RotoService {
     /// 押下時に済んでいるので、INST 冊にはそのトラックのライブラベルが出ている）。
     /// シリアル往復（数百 ms）の間は実機の CC が止まる — 冊の移動時なので無害
     private func jumpToInstBook() {
-        Task.detached(priority: .userInitiated) {
+        guard let stamp = workGate.stamp else { return }
+        Task.detached(priority: .userInitiated) { [workGate] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             do {
                 try RotoAdminPort.withPort { session in
                     _ = try session.transact(
@@ -580,10 +609,10 @@ final class RotoService {
     // MARK: - 接続と受信
 
     private func connect() {
+        guard let stamp = workGate.stamp else { return }
         if client == nil {
             guard let created = try? MIDISysExSender.makeClient("ladyland-roto") else { return }
             client = created
-            makeInputPort(created)
             sender.tap = { RotoIOTap.shared.log($1, $0) }
             makeInjectPort(created)
         }
@@ -595,6 +624,8 @@ final class RotoService {
             return
         }
         destination = dest
+        if inputPort != 0 { MIDIPortDispose(inputPort) }
+        makeInputPort(client!)
         MIDIPortConnectSource(inputPort, source, nil)
         connected = true
         startMidiSync()
@@ -606,7 +637,7 @@ final class RotoService {
         // 全投影と面切替を撃っていた** — ログに `SMART 面へ切り替える` が
         // 2 行、`smart → smart` の無駄な切替が残っていた
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self else { return }
+            guard let self, self.workGate.stamp == stamp else { return }
             // ⭐ **握手が返っていなくても、2 秒経てば「起動は落ち着いた」**
             // とみなす。⚠️ これが無いと、firmware 通知が来ない個体で
             // **FUNC が永久に効かない**（`startupSettled` の doc）
@@ -618,10 +649,14 @@ final class RotoService {
     }
 
     private func makeInputPort(_ client: MIDIClientRef) {
+        let stamp = workGate.stamp
+        let workGate = workGate
         var assembler = SysEx7Assembler()
         let status = MIDIInputPortCreateWithProtocol(
             client, "roto-in" as CFString, ._1_0, &inputPort
         ) { [weak self] eventList, _ in
+            guard let stamp, let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             // RT スレッド — 値だけ集めて main へホップ（MIDIInput と同じ作法）
             var frames: [[UInt8]] = []
             var shorts: [(UInt8, UInt8, UInt8)] = []
@@ -657,7 +692,7 @@ final class RotoService {
             }
             guard !frames.isEmpty || !shorts.isEmpty || !rawWords.isEmpty else { return }
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.workGate.stamp == stamp else { return }
                 for word in rawWords {
                     // type 3 = SysEx7 のデータワード。status は上位ニブルの次
                     NSLog("roto: [生UMP] %08X (type=%d)", word, Int((word >> 28) & 0xF))
@@ -675,10 +710,12 @@ final class RotoService {
     /// 受けた SysEx / 短 MIDI をそのまま **同じ送信キュー**で ROTO へ中継 —
     /// 第 2 経路を作らない規律（`RotoSendQueue` の doc）を注入にも守らせる
     private func makeInjectPort(_ client: MIDIClientRef) {
+        let workGate = workGate
         var assembler = SysEx7Assembler()
         let status = MIDIDestinationCreateWithProtocol(
             client, "Ladyland RotoInject" as CFString, ._1_0, &injectPort
         ) { [weak self] eventList, _ in
+            guard let stamp = workGate.stamp else { return }
             var frames: [[UInt8]] = []
             var shorts: [(UInt8, UInt8, UInt8)] = []
             for packet in eventList.unsafeSequence() {
@@ -696,7 +733,7 @@ final class RotoService {
             }
             guard !frames.isEmpty || !shorts.isEmpty else { return }
             DispatchQueue.main.async {
-                guard let self, let destination = self.destination else { return }
+                guard let self, self.workGate.stamp == stamp, let destination = self.destination else { return }
                 for frame in frames {
                     RotoIOTap.shared.log("inject", frame, note: Roto.describe(frame))
                     self.sender.send([frame], to: destination)
@@ -898,8 +935,10 @@ final class RotoService {
             // 自発メッセージが来ない静かな個体への保険は 5 秒
             if Self.mixProjectionEnabled, !projectedThisPlug {
                 mixSettleAnchor = Date()
+                let scheduledGeneration = workGate.stamp
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(5))
+                    guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration, !Task.isCancelled else { return }
                     guard let self, self.connected, !self.projectedThisPlug else { return }
                     NSLog("roto: settle の自発メッセージが来ない — 保険で初回投影")
                     self.projectMixOnceOfficial()
@@ -1267,8 +1306,10 @@ final class RotoService {
             // 送らなかった**。デバイスが `0B 13` を受け付けるのが面に入った
             // 直後だけなら、唯一のチャンスを面に入る前の送信で使い潰していた
             shadow.invalidateSmartPage()
+            let scheduledGeneration = workGate.stamp
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(400))
+                guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration, !Task.isCancelled else { return }
                 self?.projectFaces()
             }
         }
@@ -1320,8 +1361,10 @@ final class RotoService {
         mixSettleAnchor = nil
         projectedThisPlug = true  // 二重予約の防止
         NSLog("roto: 0C 01 後の初発話を確認 — 500ms 置いて初回投影")
+        let scheduledGeneration = workGate.stamp
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
+            guard let scheduledGeneration, self?.workGate.stamp == scheduledGeneration, !Task.isCancelled else { return }
             guard let self, self.connected else { return }
             self.projectMixOnceOfficial()
         }

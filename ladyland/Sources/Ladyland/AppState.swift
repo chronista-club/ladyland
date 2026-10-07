@@ -39,7 +39,8 @@ final class AppState: ObservableObject {
     /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
     private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
-    let ledBus = LedBus()
+    let midiUse = MIDIUseSession()
+    lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
     let roto = RotoService()
     /// Keystage の ARP / CHORD 設定を送り込む常駐（push 型。docs/keystage/README.md）
@@ -451,6 +452,8 @@ final class AppState: ObservableObject {
     /// 成功したら差分焼きの影（`rotoDiffShadow`）をここで初期化する —
     /// 以降はライブラベル・カラーの変更が自動で差分焼きされる
     func burnRotoSetups() {
+        let gate = roto.workGate
+        guard let stamp = gate.stamp else { return }
         NSLog("roto: burn 入口")
         rotoBurnResult = "焼き込み中…（数秒。ROTO-SETUP は閉じておく）"
         rotoShadowStatus = .burning("全冊")
@@ -463,6 +466,8 @@ final class AppState: ObservableObject {
         let buttonColor = rotoColors.selectButton
         NSLog("roto: burn 材料そろった — detached へ")
         Task.detached(priority: .userInitiated) {
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             NSLog("roto: burn detached 開始")
             let outcome: (summary: String, requests: [(key: RotoMidiSetupExport.SeatKey, request: [UInt8])]?)
             do {
@@ -478,6 +483,7 @@ final class AppState: ObservableObject {
             }
             NSLog("roto: burn — %@", outcome.summary)
             await MainActor.run {
+                    guard work.isCurrent else { return }
                 self.rotoBurnResult = outcome.summary
                 if let requests = outcome.requests {
                     self.rotoDiffShadow.prime(requests)
@@ -560,6 +566,8 @@ final class AppState: ObservableObject {
     }
 
     private func performRotoLiveBurn() {
+        let gate = roto.workGate
+        guard let stamp = gate.stamp else { return }
         let requests = RotoMidiSetupExport.allRequests(
             slotNames: rotoMixerSlotNames(),
             slotColors: rotoMixerSlotColors(),
@@ -575,6 +583,8 @@ final class AppState: ObservableObject {
         }
         rotoShadowStatus = .burning("\(pending.count) 席")
         Task.detached(priority: .userInitiated) {
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             do {
                 let summary = try RotoMidiSetupExport.burnDiff(pending)
                 NSLog("roto: 差分焼き — %@", summary)
@@ -585,6 +595,7 @@ final class AppState: ObservableObject {
                 // L02 INST #25 / L03 INST2 #2 の冊名割れ）。成功後保存なら
                 // quit で焼きが飛んでもディスクは古いまま = 次回起動で自己修復
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.saveRotoShadow()
                     self.rotoShadowStatus = .synced("\(pending.count) 席 \(Self.shadowClock())")
                 }
@@ -597,6 +608,7 @@ final class AppState: ObservableObject {
                 NSLog("roto: 差分焼き — ポートが取れない（%@）。リトライ",
                     String(describing: underlying))
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.rotoShadowStatus = .portBusy
                     self.loadRotoShadow()
                     self.scheduleRotoLiveBurn()  // → .waiting（primed なら）
@@ -606,6 +618,7 @@ final class AppState: ObservableObject {
                 // 影ごと捨てて差分焼きを黙らせる（全焼きボタンで信頼を再出発）
                 NSLog("roto: 差分焼き失敗 — 影を捨てて停止: %@", String(describing: error))
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.rotoDiffShadow.invalidate()
                     self.saveRotoShadow()
                     self.rotoShadowStatus = .unprimed
@@ -758,6 +771,7 @@ final class AppState: ObservableObject {
     }
 
     func start() {
+        bindMIDIUseSession()
         startCoreRuntime()
         startFieldProjection()
         observeOutputDevices()
@@ -767,8 +781,50 @@ final class AppState: ObservableObject {
         startKeystageService()
         bindLpd8Editor()
         restoreSession()
+        midiUse.start()
         observeThemeChanges()
         startSelfTestIfRequested()
+    }
+
+    private func bindMIDIUseSession() {
+        let access = midiUse.access
+        MIDISysExSender.setEndpointAccess(input: { access.allowsInput($0) },
+                                         output: { access.allowsOutput($0) })
+        ledBus.setDeviceAvailable(false)
+        midiUse.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        midiUse.onReleased = { [weak self] device in
+            guard let self else { return }
+            self.midi?.refresh()
+            self.router.releaseDevice(device.deviceID)
+            switch device.profileID {
+            case "lpd8":
+                self.ledBus.setDeviceAvailable(false)
+                self.lpd8Editor.releaseDevice()
+            case "roto":
+                self.rotoLiveBurnTask?.cancel()
+                await self.roto.releaseDevice()
+            case "keystage": await self.keystage.releaseDevice()
+            case "nanokontrol": self.surfaceGainPickup.reset()
+            default: break
+            }
+        }
+        midiUse.onAcquired = { [weak self] device in
+            guard let self else { return }
+            switch device.profileID {
+            case "lpd8": self.ledBus.setDeviceAvailable(true)
+            case "roto": self.roto.acquireDevice()
+            case "keystage": self.keystage.acquireDevice()
+            default: break
+            }
+        }
+        midiUse.onSnapshot = { [weak self] snapshot in
+            guard let self else { return }
+            self.midi?.updateDevices(snapshot)
+            self.midiConnectedSources = self.midi?.connectedSources ?? []
+            self.midiConnected = self.midi?.connected ?? []
+        }
     }
 
     /// ログを開いてから Audio / MIDI を起動する。ログの取りこぼしを防ぐため、
@@ -801,7 +857,7 @@ final class AppState: ObservableObject {
 
         do {
             try rack.start()
-            let input = MIDIInput(router: router)
+            let input = MIDIInput(router: router, access: midiUse.access)
             try input.start()
             midi = input
             updateRouting()
@@ -993,9 +1049,6 @@ final class AppState: ObservableObject {
             }
         })
         midi?.onSetupChanged = { [weak self] in
-            self?.ledBus.reconnect()
-            self?.roto.reconnect()
-            self?.keystage.reconnect()
             // Jack 結線図の接続表示（挿抜で線の色が変わる）
             self?.midiConnectedSources = self?.midi?.connectedSources ?? []
             self?.midiConnected = self?.midi?.connected ?? []
@@ -1061,12 +1114,8 @@ final class AppState: ObservableObject {
     private func bindLpd8Editor() {
         // LPD8 エディタの配線（design/06 §8）: 送信口 / SysEx 受信 /
         // LedBus の suspend 窓 / GET でパッド → ノート対応を実機に追従
-        lpd8Editor.send = { frame in
-            guard let dest = try? MIDISysExSender.destination(matching: "LPD8") else {
-                return false
-            }
-            MIDISysExSender.send(frame, to: dest)
-            return true
+        lpd8Editor.send = { [weak self] frame in
+            self?.midiUse.send(profileID: "lpd8", bytes: frame, completion: {}) ?? false
         }
         lpd8Editor.onBeginSysEx = { [weak self] in self?.ledBus.suspend() }
         lpd8Editor.onEndSysEx = { [weak self] in self?.ledBus.resume() }
@@ -1077,9 +1126,7 @@ final class AppState: ObservableObject {
             self?.updateRouting()  // ノブ CC が変われば横取り集合も変わる
         }
         midi?.sysexRelay.setHandler { [weak self] frame in
-            Task { @MainActor [weak self] in
-                self?.lpd8Editor.handleSysEx(frame)
-            }
+            MainActor.assumeIsolated { self?.lpd8Editor.handleSysEx(frame) }
         }
     }
 

@@ -10,6 +10,7 @@ let package = Package(
         .macOS(.v15)
     ],
     dependencies: [
+        .package(url: "https://github.com/chronista-club/midistage.git", revision: "0d3c3f5e22dac62c0e701daaa17fcd173f41df18"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
         // 「path 依存で共有」パターン（cortex ↔ midistage-profiles と同型）
@@ -57,6 +58,7 @@ let package = Package(
                 "Lpd8Kit",
                 "RotoKit",
                 "KeystageKit",
+                .product(name: "MidistageClient", package: "midistage"),
                 .product(name: "CreoUI", package: "swift"),
                 .product(name: "UnisonClient", package: "club-unison"),
                 .product(name: "GRDB", package: "GRDB.swift")
