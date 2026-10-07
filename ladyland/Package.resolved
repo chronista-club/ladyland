@@ -1,6 +1,15 @@
 {
-  "originHash" : "a8cdc7cf48b286132b37a22100d9b3f7e5b250cccb4723a332a8997c4b43842a",
+  "originHash" : "1acc9fdf879e77ff83e778f8b42c445245cb4d55fd9fe1dabc400ba7eaccb8b7",
   "pins" : [
+    {
+      "identity" : "club-unison",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/chronista-club/club-unison.git",
+      "state" : {
+        "revision" : "63eff2ed86846fafd50a726f693e45cfe7e9595d",
+        "version" : "2.0.0"
+      }
+    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",

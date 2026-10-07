@@ -70,5 +70,5 @@ MIDIUseSession が midistaged の lease を受け取り、MIDIInput / SysEx / LE
 解放時は機材ごとの保持音・sustain を整理し、LPD8 GET/SET の再試行、遅延 MIDI、ROTO serial 作業、Keystage 作業を止めて終了を待つ。
 Keystage の途中の接続モードは共通サービスが物理送信完了を追跡して解除する。
 
-関連303テストと、音声/MIDIを起動しない SwiftUI 描画で確認済み。物理機材の入力・音・LED・画面とアプリ間の往復は実機確認待ち。
-SwiftPM は既存 local club-unison と SDK の remote club-unison の同一 identity に警告を出す。今回のビルドは通るが、依存元の統一は別途必要。
+関連307テストと、音声/MIDIを起動しない SwiftUI 描画で確認済み。物理機材の入力・音・LED・画面とアプリ間の往復は実機確認待ち。
+Field と MIDI SDK が使う Unison は同じ GitHub package / 2.0.0 に統一し、local/remote の package identity 衝突を避ける。
