@@ -140,6 +140,8 @@ final class LedBus {
     private(set) var shadow: [UInt8]?
     private(set) var inFlight = false
     private var sentAtNs: UInt64 = 0
+    private var generation: UInt64 = 0
+    private var deviceAvailable = true
 
     /// 基本色レイヤ（KeyScale PR で音階の色に置き換わる。それまでは静かな青）
     private var base: [Rgb8] = Array(repeating: Rgb8(0, 24, 48), count: 8)
@@ -210,10 +212,16 @@ final class LedBus {
 
     /// 挿抜時: 宛先とワイヤ状態を捨てて全再描画（MIDIInput.onSetupChanged から）
     func reconnect() {
+        generation &+= 1
         sender.invalidate()
         shadow = nil
         inFlight = false
         pump()
+    }
+
+    func setDeviceAvailable(_ available: Bool) {
+        deviceAvailable = available
+        reconnect()
     }
 
     func suspend() {
@@ -229,8 +237,10 @@ final class LedBus {
     /// 終了時: 全消灯を 1 発（0x06 上書きは挿し直しまで残るため、
     /// 中途半端な表示を実機に置き去りにしない）
     func shutdown() {
+        generation &+= 1
         timer?.invalidate()
         timer = nil
+        guard deviceAvailable else { return }
         _ = sender.send(Self.allOffFrame) {}
     }
 
@@ -242,6 +252,7 @@ final class LedBus {
         }
         // watchdog: 送信中の抜線などで完了が来ない場合に自己回復する
         if inFlight, nowNs - sentAtNs > Self.inFlightTimeoutNs {
+            generation &+= 1
             inFlight = false
             sender.invalidate()
             shadow = nil
@@ -252,7 +263,7 @@ final class LedBus {
     /// completion-gated 送信の心臓部。
     /// 送るのは「有効・非サスペンド・in-flight なし・差分あり」の時だけ
     func pump() {
-        guard enabled, !suspended, !inFlight else { return }
+        guard deviceAvailable, enabled, !suspended, !inFlight else { return }
         // ⚠️ **ここで論理席順 → 実機セル順へ並べ替える**（`swapPadRows`）。
         // `base`（KeyScale）も `playStates`（サンプラー）も `flashPad` も
         // **全部が論理席順**（上段が先）なので、変換は 1 か所・最後だけでいい
@@ -263,8 +274,9 @@ final class LedBus {
                     flashPad: flashPad, level: levelProvider()))
         )
         guard frame != shadow else { return }
+        let sentGeneration = generation
         let accepted = sender.send(frame) { [weak self] in
-            guard let self else { return }
+            guard let self, self.generation == sentGeneration else { return }
             self.inFlight = false
             self.shadow = frame
             self.pump()  // 完了 = 次を送っていい合図（中間状態は合流して消える）
@@ -276,10 +288,14 @@ final class LedBus {
     }
 
     private func forceAllOff() {
+        guard deviceAvailable else { return }
+        generation &+= 1
+        let sentGeneration = generation
         // キルスイッチはゲートを通さず即消灯（in-flight 中でも上書きでよい —
         // 56B なので後勝ちで確実に消える）
         _ = sender.send(Self.allOffFrame) { [weak self] in
-            self?.inFlight = false
+            guard let self, self.generation == sentGeneration else { return }
+            self.inFlight = false
         }
         shadow = Self.allOffFrame
     }

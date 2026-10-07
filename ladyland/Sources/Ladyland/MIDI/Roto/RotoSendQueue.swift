@@ -27,6 +27,13 @@ final class RotoSendQueue {
     /// **これがただ 1 本のキュー**。private のまま外へ出さない
     private let queue = DispatchQueue(label: "ladyland.roto.send")
 
+    private let gate: MIDIWorkGate
+    private let sysEx: @Sendable ([UInt8], MIDIEndpointRef) -> Void
+    private let raw: @Sendable ([UInt8], MIDIEndpointRef) -> Void
+    init(gate: MIDIWorkGate, sysEx: @escaping @Sendable ([UInt8], MIDIEndpointRef) -> Void = { MIDISysExSender.send($0, to: $1) }, raw: @escaping @Sendable ([UInt8], MIDIEndpointRef) -> Void = { MIDISysExSender.sendRaw($0, to: $1) }) {
+        self.gate = gate; self.sysEx = sysEx; self.raw = raw
+    }
+
     /// I/O デバッグの覗き窓（`RotoIOTap`）。送る直前に呼ばれる（送信キュー上）
     var tap: (@Sendable ([UInt8], String) -> Void)?
 
@@ -38,10 +45,14 @@ final class RotoSendQueue {
     ///   一度も固まらせていない（実測 2026-08-11。Creo
     ///   `mem_1CdvSucMFyzZ4BEpFgJVpX`）
     func send(_ messages: [[UInt8]], to destination: MIDIEndpointRef, gap: UInt32 = 5_000) {
-        queue.async { [tap] in
+        guard let stamp = gate.stamp else { return }
+        queue.async { [tap, gate, sysEx] in
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             for message in messages {
+                guard work.isCurrent else { return }
                 tap?(message, "out")
-                MIDISysExSender.send(message, to: destination)
+                sysEx(message, destination)
                 usleep(gap)
             }
         }
@@ -57,10 +68,14 @@ final class RotoSendQueue {
         _ messages: [[UInt8]], to destination: MIDIEndpointRef,
         gap: UInt32, after delay: TimeInterval = 0
     ) {
-        let flush = { [tap] in
+        guard let stamp = gate.stamp else { return }
+        let flush: @Sendable () -> Void = { [tap, gate, raw] in
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             for message in messages {
+                guard work.isCurrent else { return }
                 tap?(message, "out")
-                MIDISysExSender.sendRaw(message, to: destination)
+                raw(message, destination)
                 usleep(gap)
             }
         }

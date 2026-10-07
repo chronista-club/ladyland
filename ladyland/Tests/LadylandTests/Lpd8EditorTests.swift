@@ -122,3 +122,23 @@ struct Lpd8PresetStoreTests {
         #expect(Lpd8PresetStore.list(in: dir).isEmpty)
     }
 }
+
+@Test @MainActor
+func lpd8HandoffCancelsGetBackAndPreservesWorkingEdit() async throws {
+    let editor = Lpd8EditorModel()
+    var frames: [[UInt8]] = []
+    editor.send = { frames.append($0); return true }
+    editor.read()
+    editor.handleSysEx(Lpd8ProgramTests.golden)
+    editor.program?.pads[0].note = 72
+    let working = editor.program
+    editor.write()
+    #expect(frames.count == 2)
+    editor.releaseDevice()
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(frames.count == 2)
+    #expect(editor.program == working)
+    #expect(editor.deviceCopy == nil)
+    editor.write()
+    #expect(frames.count == 2)
+}

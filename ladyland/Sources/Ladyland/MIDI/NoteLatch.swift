@@ -89,6 +89,49 @@ struct NoteLatch {
         return orphaned
     }
 
+    /// 機材の使用を止めるときは、押下中も含めてその入力の音を整理する。
+    mutating func drainAll() -> [(note: UInt8, channel: UInt8)] {
+        let active = soundingNotes
+        held.removeAll()
+        sustained.removeAll()
+        isEngaged = false
+        return active
+    }
+
+    var soundingNotes: [(note: UInt8, channel: UInt8)] {
+        held.merging(sustained, uniquingKeysWith: { held, _ in held })
+            .map { (note: $0.key, channel: $0.value) }.sorted { $0.note < $1.note }
+    }
+
     /// 診断用: いまキープで鳴らし続けている音の数
     var sustainedCount: Int { sustained.count }
+}
+
+/// PC キーボードを含む各入力の帳簿。使用権を返す機材だけを消せる。
+struct DeviceNoteLatches {
+    private var devices: [String: NoteLatch] = [:]
+    var heldNotes: [UInt8] { Set(devices.values.flatMap(\.heldNotes)).sorted() }
+    var sustainedCount: Int { devices.values.reduce(0) { $0 + $1.sustainedCount } }
+    func isEngaged(deviceID: String = "local") -> Bool { devices[deviceID]?.isEngaged ?? false }
+    mutating func noteOn(_ note: UInt8, channel: UInt8, deviceID: String = "local") {
+        devices[deviceID, default: NoteLatch()].noteOn(note, channel: channel)
+    }
+    mutating func shouldSendNoteOff(_ note: UInt8, deviceID: String = "local") -> Bool {
+        devices[deviceID, default: NoteLatch()].shouldSendNoteOff(note)
+    }
+    mutating func pedal(_ value: UInt8, deviceID: String = "local") -> [(note: UInt8, channel: UInt8)] {
+        devices[deviceID, default: NoteLatch()].pedal(value)
+    }
+    mutating func reset() -> [(note: UInt8, channel: UInt8)] {
+        var release: [(note: UInt8, channel: UInt8)] = []
+        for id in Array(devices.keys) { release += devices[id]!.reset() }
+        return release
+    }
+    mutating func drain(deviceID: String) -> [(note: UInt8, channel: UInt8)] {
+        guard var removed = devices.removeValue(forKey: deviceID) else { return [] }
+        let other = devices.values.flatMap(\.soundingNotes)
+        return removed.drainAll().filter { note in
+            !other.contains { $0.note == note.note && $0.channel == note.channel }
+        }
+    }
 }

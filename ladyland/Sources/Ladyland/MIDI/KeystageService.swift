@@ -122,6 +122,7 @@ final class KeystageService: ObservableObject {
     private var lastSent: KeystageSettings?
 
     /// SysEx は往復があるので専用キューで直列に捌く
+    nonisolated let workGate = MIDIWorkGate()
     private let queue = DispatchQueue(label: "ladyland.keystage")
 
     /// 受信箱（CoreMIDI コールバックは直列なのでロックは軽い）
@@ -158,8 +159,21 @@ final class KeystageService: ObservableObject {
     }
     private let inbox = Inbox()
 
-    func start() {
-        connect()
+    func start() { connect() }
+    func acquireDevice() {
+        guard workGate.activate() else { return }
+        reconnect()
+    }
+    func releaseDevice() async {
+        workGate.revoke()
+        connected = false
+        destination = nil
+        sceneDump = nil
+        lastSent = nil
+        oledShadow.removeAll()
+        if inputPort != 0 { MIDIPortDispose(inputPort); inputPort = 0 }
+        await workGate.waitUntilIdle()
+        _ = inbox.drain()
     }
 
     /// 挿抜時（MIDIInput.onSetupChanged から）
@@ -205,7 +219,11 @@ final class KeystageService: ObservableObject {
         for line in changed { oledShadow[line.key] = line.text }
         let channel = globalChannel
         let model = self.model
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async {
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             Self.withConnection(channel: channel, model: model, destination: destination) {
                 for line in changed {
                     MIDISysExSender.send(
@@ -227,8 +245,9 @@ final class KeystageService: ObservableObject {
     private func scheduleRescan() {
         guard let delay = MIDIRescan.delay(afterAttempt: rescanAttempt) else { return }
         rescanAttempt += 1
+        let stamp = workGate.stamp
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, !self.connected else { return }
+            guard let self, let stamp, self.workGate.stamp == stamp, !self.connected else { return }
             NSLog("keystage: 再列挙 %d 回目（起動レースの救済）", self.rescanAttempt)
             self.connect()
         }
@@ -237,18 +256,18 @@ final class KeystageService: ObservableObject {
     // MARK: - 接続
 
     private func connect() {
+        guard workGate.stamp != nil else { return }
         if client == nil {
             guard let created = try? MIDISysExSender.makeClient("ladyland-keystage") else {
                 return
             }
             client = created
-            makeInputPort(created)
         }
         // DAW ポートを優先（公式スクリプトの実証と同じ）
         var candidates: [(String, MIDIEndpointRef)] = []
         for i in 0..<MIDIGetNumberOfDestinations() {
             let dest = MIDIGetDestination(i)
-            if let name = Self.displayName(of: dest), name.contains("Keystage") {
+            if let name = Self.displayName(of: dest), name.contains("Keystage"), MIDISysExSender.isAllowed(name: name, input: false) {
                 candidates.append((name, dest))
             }
         }
@@ -258,6 +277,8 @@ final class KeystageService: ObservableObject {
             scheduleRescan()
             return
         }
+        if inputPort != 0 { MIDIPortDispose(inputPort) }
+        makeInputPort(client!)
         destination = target.1
         connected = true
         NSLog("keystage: 接続 — %@", target.0)
@@ -273,9 +294,13 @@ final class KeystageService: ObservableObject {
         // 永久に組み上がらない（短い ACK だけ届いて Dump が来ない、という
         // 切り分けの難しい症状になる）
         var assembler = SysEx7Assembler()
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         let status = MIDIInputPortCreateWithProtocol(
             client, "keystage-in" as CFString, ._1_0, &inputPort
         ) { [inbox] eventList, _ in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             for packet in eventList.unsafeSequence() {
                 let count = Int(packet.pointee.wordCount)
                 withUnsafePointer(to: packet.pointee.words) { tuple in
@@ -293,7 +318,7 @@ final class KeystageService: ObservableObject {
         }
         for i in 0..<MIDIGetNumberOfSources() {
             let source = MIDIGetSource(i)
-            if (Self.displayName(of: source) ?? "").contains("Keystage") {
+            if (Self.displayName(of: source) ?? "").contains("Keystage"), MIDISysExSender.isAllowed(endpoint: source, input: true) {
                 MIDIPortConnectSource(inputPort, source, nil)
             }
         }
@@ -302,7 +327,11 @@ final class KeystageService: ObservableObject {
     /// 握手して現在の Scene Dump を読む（起動時 1 回）
     private func handshakeAndLoad() {
         guard let destination else { return }
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async { [weak self] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             guard let self else { return }
             // 1. Device Inquiry で global ch と機種を判別
             _ = self.inbox.drain()
@@ -384,6 +413,7 @@ final class KeystageService: ObservableObject {
             }
 
             Task { @MainActor [weak self] in
+                guard workGate.stamp == stamp else { return }
                 guard let self else { return }
                 self.globalChannel = channel
                 self.model = detected
@@ -446,7 +476,11 @@ final class KeystageService: ObservableObject {
             globalChannel: globalChannel, model: model)
         let channel = globalChannel
         let detected = model
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async { [weak self] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             guard let self else { return }
             Self.withConnection(channel: channel, model: detected, destination: destination) {
             _ = self.inbox.drain()
@@ -510,7 +544,11 @@ final class KeystageService: ObservableObject {
         let channel = globalChannel
         let detected = model
 
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async { [weak self] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             guard let self else { return }
             Self.withConnection(channel: channel, model: detected, destination: destination) {
                 _ = self.inbox.drain()
@@ -534,7 +572,11 @@ final class KeystageService: ObservableObject {
         guard connected, let destination else { return }
         let channel = globalChannel
         let detected = model
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async { [weak self] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             guard let self else { return }
             var dump: [UInt8]?
             Self.withConnection(channel: channel, model: detected, destination: destination) {
@@ -551,6 +593,7 @@ final class KeystageService: ObservableObject {
                 }
             }
             Task { @MainActor [weak self] in
+                guard workGate.stamp == stamp else { return }
                 guard let dump else {
                     NSLog("keystage: Global Dump が返ってこなかった")
                     return
@@ -591,7 +634,11 @@ final class KeystageService: ObservableObject {
             globalChannel: globalChannel, model: model)
         let channel = globalChannel
         let detected = model
+        guard let stamp = workGate.stamp else { return }
+        let workGate = workGate
         queue.async { [weak self] in
+            guard let work = workGate.begin(stamp) else { return }
+            defer { work.finish() }
             guard let self else { return }
             Self.withConnection(channel: channel, model: detected, destination: destination) {
                 _ = self.inbox.drain()

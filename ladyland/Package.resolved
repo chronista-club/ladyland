@@ -1,5 +1,5 @@
 {
-  "originHash" : "469d3ba66039b36727a4196ce2a71c851fb3fa5bd45ec98a2c59d1d9835295a6",
+  "originHash" : "a8cdc7cf48b286132b37a22100d9b3f7e5b250cccb4723a332a8997c4b43842a",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -8,6 +8,14 @@
       "state" : {
         "revision" : "b83108d10f42680d78f23fe4d4d80fc88dab3212",
         "version" : "7.11.1"
+      }
+    },
+    {
+      "identity" : "midistage",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/chronista-club/midistage.git",
+      "state" : {
+        "revision" : "0d3c3f5e22dac62c0e701daaa17fcd173f41df18"
       }
     },
     {

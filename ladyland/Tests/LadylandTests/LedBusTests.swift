@@ -303,3 +303,18 @@ struct Lpd8PadRowTests {
         #expect(direct != swapped, "中身は入れ替わっている")
     }
 }
+
+@Test @MainActor
+func lateLEDCompletionCannotCompleteNewConnectionFrame() {
+    let sender = FakeLedSender()
+    let bus = LedBus(sender: sender)
+    bus.pump()
+    bus.reconnect()
+    #expect(sender.sentFrames.count == 2)
+    sender.completeOldest()
+    #expect(bus.inFlight)
+    #expect(bus.shadow == nil)
+    sender.completeOldest()
+    #expect(!bus.inFlight)
+    #expect(bus.shadow != nil)
+}
