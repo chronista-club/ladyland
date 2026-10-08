@@ -5,10 +5,18 @@ struct XTouchSurfaceView: View {
     @Environment(\.creoTheme) private var theme
     @ObservedObject var controller: XTouchController
     @ObservedObject var rack: InstrumentRack
+    @State private var showingAssignments = false
 
     var body: some View {
         ScrollView(.vertical) {
         VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("X-Touch / Mixer Surface").font(LadylandFont.deskHeading)
+                Spacer(minLength: 8)
+                Button(showingAssignments ? "操作面に戻る" : "割当一覧") {
+                    showingAssignments.toggle()
+                }.controlSize(.small)
+            }
             HStack {
                 Circle().fill(controller.connected ? theme.semanticSuccessText : theme.textTertiary)
                     .frame(width: 7, height: 7)
@@ -16,6 +24,9 @@ struct XTouchSurfaceView: View {
                 Spacer()
                 Text("8ch + Master").foregroundStyle(theme.textSecondary)
             }.font(LadylandFont.deskCaption)
+            if showingAssignments {
+                assignments
+            } else {
             navigation
             if let error = controller.error {
                 Text(error).font(LadylandFont.deskCaption).foregroundStyle(theme.semanticError)
@@ -48,8 +59,30 @@ struct XTouchSurfaceView: View {
             }
             Text("本体: MC / USB · ノブ: Pan · ノブ押下: 中央へ")
                 .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
+            }
             Spacer(minLength: 0)
         }.padding(12)
+        }
+    }
+    private var assignments: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("左8列の担当はBANK / CHANNELで移動します。SELECTを押すまで選択Trackは変わりません。")
+                .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
+            ForEach([true, false], id: \.self) { assigned in
+                Text(assigned ? "割当済み" : "未割当")
+                    .font(LadylandFont.deskHeading)
+                ForEach(XTouchAssignments.all.filter { $0.assigned == assigned }) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.control).font(LadylandFont.deskHeading)
+                        Text(item.action).font(LadylandFont.deskCaption)
+                            .foregroundStyle(theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Divider()
+                }
+            }
+            Text("LCDはTrack名・音量・Trackカラーを表示。SOLO / MUTE / SELECTのLEDは状態に追従します。レベルメーターとタイム表示は未対応です。")
+                .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
         }
     }
     private var navigation: some View {

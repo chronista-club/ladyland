@@ -34,8 +34,19 @@ Pan/Solo/MasterはSQLiteへ追加列で保存し、旧JSON/DBはPan=0、Solo=fal
 実機のMC/USB mode、LCDの色、motor追従、Panの聴感は実機確認が必要。
 Transport / plugin割当は初版の対象外。
 
+## Jack / VirtualDesk からの入口と割当一覧
+
+Jackの共通ヘッダに「X-Touch → Mixer Surface」を置く。サイドバー・2.5D・3Dで同じ入口を使い、
+既存のX-Touch Paneを開く。開いていれば前面へ戻す。独立したRackやMIDI接続を作らない。
+Mixer Surfaceは既存の8ch + Master操作と「割当一覧」を持ち、実装済みの操作と未割当を分ける。
+一覧は `XTouchAssignments` に集約し、実際にdecodeするボタンの網羅をテストする。
+未接続でも一覧を参照できる。Recは役割をこのSurfaceで詰めるまで未割当とし、録音できる表示にしない。
+3D機材のドラッグや既存のnanoKONTROL2用Mixer部品の結線は変更しない。
+
 ## Status log
 
 - 2026-10-08: 8ch + 1ch MasterのGO。Bank±8/Channel±1を追加。
 - 2026-10-08: 内部64Trackに揃える裁定。Masterはドラムを含む全体音量。起動/再接続の演出はLCDと色の短い表示とし、復元完了後に実値を投影する。
 - 2026-10-08: 807 tests passed（終了時の明示的なSDK closeを含む）。専用の音声/MIDI/保存なしのネイティブ確認窓で9ストリップ、BANK/CHANNEL、Select/Mute/Soloを観測。実機motor/LCD/音声は別確認。
+- 2026-10-08: ユーザーが再接続時LCD演出とFADER BANK / CHANNELの実機動作を確認。
+- 2026-10-09: Jack / VirtualDesk の「X-Touch → Mixer Surface」を機能整理の中心とするGO。割当一覧を操作面へ集約する。Recの役割は未決定。

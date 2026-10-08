@@ -127,6 +127,32 @@ struct XTouchProjectionTests {
 
 @MainActor @Suite("X-Touch mixer actions")
 struct XTouchControllerTests {
+    @Test("全64TrackでSolo/Mute/Selectの押下とLEDが一致し、releaseは再操作しない")
+    func channelButtonsAcrossBanks() throws {
+        let rack = InstrumentRack()
+        let controller = XTouchController(rack: rack, onSelect: { rack.select($0) }, onChange: {})
+        for index in 0..<64 {
+            controller.move(index - controller.bank.start)
+            let channel = index - controller.bank.start
+            for (base, key) in [(0x08, "solo"), (0x10, "mute"), (0x18, "select")] {
+                let note = UInt8(base + channel)
+                let event = try #require(XTouchMCU.decode(0x90, note, 127))
+                controller.handle(event)
+                #expect(XTouchMCU.decode(0x90, note, 0) == nil)
+                #expect(XTouchMCU.decode(0x80, note, 127) == nil)
+                let frames = XTouchProjection.frames(strips: controller.strips, master: rack.masterGain, touched: [], greeting: false)
+                #expect(frames.contains { $0.key == "\(key).\(channel)" && $0.bytes == [0x90, note, 127] })
+            }
+            #expect(rack.slots[index].solo)
+            #expect(rack.slots[index].mute)
+            #expect(rack.selected == index)
+            controller.handle(.solo(channel))
+            controller.handle(.mute(channel))
+            #expect(!rack.slots[index].solo)
+            #expect(!rack.slots[index].mute)
+        }
+    }
+
     @Test("64 Trackを移動してもMasterは独立。echoは無視しtouch中だけ入力")
     func fadersAndBank() async {
         let rack = InstrumentRack()
