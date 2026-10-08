@@ -51,6 +51,17 @@ final class MIDIUseSession: ObservableObject {
         return true
     }
 
+    /// 接続取得時のleaseを固定し、遅延した旧接続の送信を新しい機材へ流さない。
+    func sendXTouch(_ bytes: [UInt8], lease: String) async throws {
+        try Task.checkCancellation()
+        guard let client, connected,
+              let device = devices.first(where: { $0.profileID == "xtouch" && owns($0) }),
+              device.lease?.token == lease,
+              let port = device.nativeOutputs.first(where: { $0.hasSuffix("X-Touch INT") })
+        else { throw MIDIUseError.unavailable }
+        _ = try await client.sendMIDI(deviceID: device.deviceID, leaseToken: lease, portName: port, bytes: bytes)
+    }
+
     /// 一つの受信 loop だけから適用する。遅延した応答では所有権を戻さない。
     func apply(_ incoming: MidistageClient.Snapshot) async {
         guard access.update(incoming) else { return }

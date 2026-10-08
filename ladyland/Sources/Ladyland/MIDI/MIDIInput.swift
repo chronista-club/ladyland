@@ -1097,6 +1097,7 @@ enum MIDISourceRoute: Equatable, Sendable {
     /// ミキサーを置く」）。鍵盤扱いしない — フェーダーの CC0-7 は Keystage の席と
     /// 同じ番号なので、経路ごと分ける
     case surface
+    case xtouch
 }
 
 /// 繋いだソース（Jack 結線図の表示用）
@@ -1123,6 +1124,7 @@ final class MIDIInput {
     private(set) var connectedSources: [String] = []
     private(set) var connected: [MIDIConnectedSource] = []
     var onSetupChanged: (() -> Void)?
+    var onXTouch: (@MainActor (UInt8, UInt8, UInt8) -> Void)?
     let sysexRelay = SysExRelay()
 
     init(router: MIDIRouter, access: NativeAccess) {
@@ -1160,6 +1162,9 @@ final class MIDIInput {
         if name.contains("Keystage") { return .keystage }
         if name.contains("LPD8") { return .drums }
         if name.contains("nanoKONTROL") { return .surface }
+        if name.lowercased().contains("x-touch") {
+            return name.hasSuffix("X-Touch INT") ? .xtouch : nil
+        }
         // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
         // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
         // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
@@ -1220,6 +1225,7 @@ final class MIDIInput {
             sourceSequence += 1
             let sourceID = sourceSequence
             let router = router, access = access, relay = sysexRelay
+            let xtouch = onXTouch
             let status = MIDIInputPortCreateWithProtocol(client, name as CFString, ._1_0, &port) { eventList, _ in
                 access.withInput(name) {
                     guard let work = gate.begin(stamp) else { return }
@@ -1239,6 +1245,13 @@ final class MIDIInput {
                         })
                     case .secondKeyboard, .miniLab:
                         Self.handle(eventList, route: { router.routeSecondKeyboard($0, $1, $2, input: entry.route == .miniLab ? .miniLab : .numa, deviceID: deviceID) })
+                    case .xtouch:
+                        Self.handle(eventList, route: { status, data1, data2 in
+                            DispatchQueue.main.async {
+                                guard access.allowsInput(name), gate.stamp == stamp else { return }
+                                xtouch?(status, data1, data2)
+                            }
+                        })
                     case .surface:
                         Self.handle(eventList, route: { router.routeSurface($0, $1, $2) })
                     }
