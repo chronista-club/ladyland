@@ -1379,6 +1379,11 @@ final class AppState: ObservableObject {
 
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
     func handleSurface(cc: UInt8, value: UInt8) {
+        // トランスポート列は机の部品ではない — 部品より先に見る（design/09）
+        if let action = Transport.action(nanoKontrolCC: cc, value: value) {
+            transport(action)
+            return
+        }
         let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
         guard
             let action = SurfaceMapping.action(
@@ -1399,6 +1404,27 @@ final class AppState: ObservableObject {
         case .trackKnob(let seat, let value):
             faceKnobs.handle(knob: seat, value127: Int(value))
             scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
+        }
+    }
+
+    // MARK: - トランスポート（design/09。mako 裁定 2026-10-09「Aで進めよう」）
+
+    /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
+    /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
+    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル。<< >> は保留（空）
+    func transport(_ action: TransportAction) {
+        switch action {
+        case .play:
+            rack.hostTempo.declareDownbeat()
+            NSLog("transport: PLAY — 小節の頭を宣言")
+        case .stop:
+            rack.hostTempo.resetBeat()
+            panic()
+        case .record:
+            rack.hostTempo.recordArmed.toggle()
+            NSLog("transport: REC 待機 %@", rack.hostTempo.recordArmed ? "on" : "off")
+        case .rewind, .fastForward:
+            break  // 意味は未裁定（design/09 §3）
         }
     }
 
