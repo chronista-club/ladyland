@@ -92,6 +92,43 @@ struct HostBeatTests {
         #expect(two.downbeat == 4)
     }
 
+    @Test(">> = 頭を 1 小節ぶん手前へ置き直す → フレーズの中で 1 小節先に進む")
+    func fastForwardMovesOneBarAhead() {
+        let (tempo, clock) = make(bpm: 120)  // 1 小節 = 4 拍 = 2 秒
+        tempo.declareDownbeat()
+        clock.now += 1_000_000_000  // 2 拍目
+        tempo.shiftDownbeat(bars: 1)
+        let r = beats(tempo)
+        #expect(abs(r.beat - 6.0) < 1e-9)
+        #expect(r.downbeat == 4)
+    }
+
+    @Test("<< = 頭を 1 小節ぶん先に置き直す → 1 小節戻る。頭より前には行かない（0 で止まる）")
+    func rewindMovesOneBarBackAndClampsAtZero() {
+        let (tempo, clock) = make(bpm: 120)
+        tempo.declareDownbeat()
+        clock.now += 5_000_000_000  // 10 拍目（3 小節目）
+        tempo.shiftDownbeat(bars: -1)
+        #expect(abs(beats(tempo).beat - 6.0) < 1e-9)
+
+        tempo.shiftDownbeat(bars: -1)
+        #expect(abs(beats(tempo).beat - 2.0) < 1e-9)
+
+        // もう 1 小節戻すと頭が未来になる → いま = 頭（拍 0）に揃える
+        tempo.shiftDownbeat(bars: -1)
+        #expect(beats(tempo).beat == 0)
+        clock.now += 500_000_000
+        #expect(abs(beats(tempo).beat - 1.0) < 1e-9, "揃えた頭から数え直す")
+    }
+
+    @Test("頭が未宣言なら << >> は何もしない")
+    func shiftWithoutDownbeatIsNoop() {
+        let (tempo, clock) = make()
+        tempo.shiftDownbeat(bars: 1)
+        clock.now += 1_000_000_000
+        #expect(beats(tempo).beat == 0)
+    }
+
     @Test("STOP = 拍を 0 へ戻す")
     func resetReturnsToZero() {
         let (tempo, clock) = make()

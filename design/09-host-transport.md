@@ -24,6 +24,7 @@ X-Touch と nanoKONTROL2 が机に載り、どちらにも同じ並びのトラ�
 > 内部的にはAUEngineが回ってるときだよね。
 > Aで進めよう
 > RECは録音待機にするのが良さそうだね。
+> << と >>は、移動かな。小節単位かな？ → それでいこう
 
 ## 3. 定義
 
@@ -33,7 +34,7 @@ X-Touch と nanoKONTROL2 が机に載り、どちらにも同じ並びのトラ�
 | PLAY | **小節の頭を宣言する**。押した瞬間を beat 0 とし、以後テンポで数える | `beatPosition` / `downbeatPosition`（4/4 固定） |
 | STOP | **パニック**（全ノートオフ。Keystage EXIT の CC120 と同じ口）+ 拍を 0 へ | `beatPosition` = 0 |
 | REC | **録音待機の ON/OFF**（トグル。実録音はしない） | `.recording` |
-| << / >> | 保留（空）。候補: スロット移動 / 小節の頭出し | — |
+| << / >> | **頭を小節単位で置き直す**（<< 1 小節戻る / >> 1 小節進む）。1 小節で回るパターンには何も起きず、2〜4 小節のフレーズで「何小節目か」が変わる。頭より前には行かない（いまに揃える）。スロット移動は TRACK ◀▶ の仕事 | `beatPosition` が ±4 |
 
 Play はエンジンの ON/OFF ではない。`engine.stop()` → `start()` は AU の
 `allocateRenderResources` が呼び直されない（2026-08-06 の 4.35 倍速事故）ので、
@@ -79,8 +80,11 @@ Keystage      （将来）───────────┘        ↓ AppSta
   Clock は 0.1 秒おきに ±0.5 BPM 揺れうるが、`MidiClockTracker` が平均しているので
   実用上は小節の頭を宣言し直せば足りる。曲の途中で大きくテンポを変える使い方は想定外
 - 拍子は 4/4 固定
+- << >> は拍単位ではない。PLAY の押し遅れは PLAY を押し直して直す。拍のナッジが要るなら
+  SHIFT 併用や長押しで後から足す
 
 ## Status log
 
 - 2026-10-09 起工。Draft
 - 2026-10-09 実装: `Transport`（読み替え）/ `HostTempo` の拍・transport 口 / `InstrumentRack` の `running` / `AppState.transport(_:)`。純テスト 15 本 GREEN。nanoKONTROL2 の PLAY / STOP / REC は**実機確認待ち**（X-Touch の受信口は wip/xtouch-surface 側）
+- 2026-10-10 << >> = 小節単位で頭を置き直す（mako「それでいこう」）。`HostTempo.shiftDownbeat(bars:)`

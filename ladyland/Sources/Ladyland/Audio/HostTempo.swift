@@ -23,7 +23,8 @@ import AudioToolbox
 final class HostTempo: @unchecked Sendable {
     /// `Double` のビット列。0 = 同期なし（プラグインは自前の既定で動く）
     private let bits: UnsafeMutablePointer<UInt64>
-    /// **小節の頭を宣言した時刻**（ナノ秒、`clock` の目盛り）。0 = 未宣言 → 拍は 0
+    /// **小節の頭を宣言した時刻**（ナノ秒、`clock` の目盛り。**`Int64` のビット列** —
+    /// << >> で頭を時計の 0 より前に置くことがある）。0 = 未宣言 → 拍は 0
     /// （design/09: PLAY = 小節の頭を宣言する）
     private let downbeatNanos: UnsafeMutablePointer<UInt64>
     /// transport の状態語。bit0 = エンジン稼働中（= 再生中）、bit1 = 録音待機
@@ -73,7 +74,27 @@ final class HostTempo: @unchecked Sendable {
 
     /// **PLAY = 小節の頭を宣言する**。いまを beat 0 とし、以後テンポで数える
     func declareDownbeat() {
-        downbeatNanos.pointee = max(1, clock())
+        setDownbeat(Int64(clock()))
+    }
+
+    private var downbeat: Int64 { Int64(bitPattern: downbeatNanos.pointee) }
+    /// 0 は「未宣言」の印なので、ちょうど 0 なら 1 ナノ秒ずらす
+    private func setDownbeat(_ nanos: Int64) {
+        downbeatNanos.pointee = UInt64(bitPattern: nanos == 0 ? 1 : nanos)
+    }
+
+    /// **<< / >> = 頭を小節単位で置き直す**（mako 裁定 2026-10-10「それでいこう」）。
+    /// 曲は無いので動かせるのは頭の位置だけ — >> は頭を 1 小節ぶん手前へ
+    /// （フレーズの中で 1 小節先へ進む）、<< は 1 小節ぶん先へ（1 小節戻る）。
+    /// 頭が未来に行くなら「いま」に揃える（拍 0。負の拍は作らない）。
+    /// 未宣言なら何もしない。1 小節 = 4 拍（design/09、4/4 固定）
+    func shiftDownbeat(bars: Int) {
+        let raw = bits.pointee
+        guard downbeatNanos.pointee != 0, raw != 0 else { return }
+        let bpm = Double(bitPattern: raw)
+        let barNanos = Int64(4 * 60 / bpm * 1_000_000_000)
+        let now = Int64(clock())
+        setDownbeat(min(now, downbeat - Int64(bars) * barNanos))
     }
 
     /// **STOP = 拍を 0 へ**（頭は未宣言に戻る）
@@ -83,9 +104,10 @@ final class HostTempo: @unchecked Sendable {
 
     /// 頭からの拍数（テンポが分からない / 頭が未宣言なら 0）
     private func beatPosition(bpm: Double, now: UInt64) -> Double {
-        let head = downbeatNanos.pointee
-        guard head != 0, now > head else { return 0 }
-        return Double(now - head) / 1_000_000_000 * bpm / 60
+        guard downbeatNanos.pointee != 0 else { return 0 }
+        let elapsed = Int64(now) - downbeat
+        guard elapsed > 0 else { return 0 }
+        return Double(elapsed) / 1_000_000_000 * bpm / 60
     }
 
     /// AU へ渡す transport の口。**差し替えない**（`musicalContextBlock` と同じ理由）。

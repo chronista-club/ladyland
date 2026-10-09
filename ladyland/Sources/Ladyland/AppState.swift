@@ -1411,7 +1411,8 @@ final class AppState: ObservableObject {
 
     /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
     /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
-    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル。<< >> は保留（空）
+    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル、<< >> = 小節単位で
+    /// 頭を置き直す（フレーズの中の位置をずらす。スロット移動は TRACK ◀▶ の仕事）
     func transport(_ action: TransportAction) {
         switch action {
         case .play:
@@ -1423,8 +1424,10 @@ final class AppState: ObservableObject {
         case .record:
             rack.hostTempo.recordArmed.toggle()
             NSLog("transport: REC 待機 %@", rack.hostTempo.recordArmed ? "on" : "off")
-        case .rewind, .fastForward:
-            break  // 意味は未裁定（design/09 §3）
+        case .rewind:
+            rack.hostTempo.shiftDownbeat(bars: -1)
+        case .fastForward:
+            rack.hostTempo.shiftDownbeat(bars: 1)
         }
     }
 
