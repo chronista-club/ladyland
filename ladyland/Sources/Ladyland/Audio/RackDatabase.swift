@@ -198,6 +198,22 @@ final class RackDatabase: @unchecked Sendable {
             }
         }
 
+        migrator.registerMigration("v13-minilab-slot") { db in
+            try db.alter(table: "rackState") { t in
+                t.add(column: "miniLabSlot", .integer)
+            }
+            // Preserve the old shared binding when opening an existing rack.
+            try db.execute(sql: "UPDATE rackState SET miniLabSlot = secondKeyboardSlot")
+        }
+        migrator.registerMigration("v14-xtouch-mix") { db in
+            try db.alter(table: "slot") { t in
+                t.add(column: "pan", .double)
+                t.add(column: "solo", .boolean)
+            }
+            try db.alter(table: "rackState") { t in
+                t.add(column: "masterGain", .double)
+            }
+        }
         return migrator
     }
 
@@ -399,6 +415,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
     var trackCount: Int
     var selected: Int
     var outputDeviceUID: String?
+    var masterGain: Float?
     var keyRoot: Int?
     var keyScale: String?
     var ledFeedback: Bool?
@@ -406,6 +423,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
     var pedalInverted: Bool?
     var synthInput1Slot: Int?
     var secondKeyboardSlot: Int?
+    var miniLabSlot: Int?
     /// Keystage の ARP / CHORD 設定（JSON。KeystageSettings をそのまま符号化）
     var keystage: String?
     /// ROTO の配色（JSON）
@@ -424,6 +442,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         trackCount = snapshot.trackCount ?? Self.legacyTrackCount
         selected = snapshot.selected
         outputDeviceUID = snapshot.outputDeviceUID
+        masterGain = snapshot.masterGain
         keyRoot = snapshot.keyRoot
         keyScale = snapshot.keyScale
         ledFeedback = snapshot.ledFeedback
@@ -431,6 +450,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         pedalInverted = snapshot.pedalInverted
         synthInput1Slot = snapshot.synthInput1Slot
         secondKeyboardSlot = snapshot.secondKeyboardSlot
+        miniLabSlot = snapshot.miniLabSlot
         keystage = snapshot.keystage
         rotoColors = snapshot.rotoColors
         theme = snapshot.theme
@@ -442,6 +462,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         var snapshot = RackSnapshot(slots: slots, selected: selected)
         snapshot.trackCount = trackCount
         snapshot.outputDeviceUID = outputDeviceUID
+        snapshot.masterGain = masterGain
         snapshot.keyRoot = keyRoot
         snapshot.keyScale = keyScale
         snapshot.ledFeedback = ledFeedback
@@ -449,6 +470,7 @@ private struct RackStateRow: Codable, FetchableRecord, PersistableRecord {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.keystage = keystage
         snapshot.rotoColors = rotoColors
         snapshot.theme = theme
@@ -468,6 +490,8 @@ private struct SlotRow: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var gain: Double
     var mute: Bool?
+    var pan: Float?
+    var solo: Bool?
     var rotoColor: Int?
     var customName: String?
     var stateHash: String?
@@ -483,6 +507,8 @@ private struct SlotRow: Codable, FetchableRecord, PersistableRecord {
         name = snapshot.name
         gain = Double(snapshot.gain)
         mute = snapshot.mute
+        pan = snapshot.pan
+        solo = snapshot.solo
         rotoColor = snapshot.rotoColor.map(Int.init)
         customName = snapshot.customName
         self.stateHash = stateHash
@@ -499,6 +525,8 @@ private struct SlotRow: Codable, FetchableRecord, PersistableRecord {
             name: name,
             gain: Float(gain),
             mute: mute,
+            pan: pan,
+            solo: solo,
             rotoColor: rotoColor.map(UInt8.init),
             customName: customName,
             state: state,
@@ -518,8 +546,8 @@ private struct SlotRow: Codable, FetchableRecord, PersistableRecord {
             sql: """
                 INSERT INTO slot
                     (slotIndex, componentType, componentSubType, componentManufacturer,
-                     name, gain, mute, rotoColor, customName, stateHash, knobs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                     name, gain, mute, pan, solo, rotoColor, customName, stateHash, knobs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
                 ON CONFLICT(slotIndex) DO UPDATE SET
                     componentType = excluded.componentType,
                     componentSubType = excluded.componentSubType,
@@ -527,13 +555,15 @@ private struct SlotRow: Codable, FetchableRecord, PersistableRecord {
                     name = excluded.name,
                     gain = excluded.gain,
                     mute = excluded.mute,
+                    pan = excluded.pan,
+                    solo = excluded.solo,
                     rotoColor = excluded.rotoColor,
                     customName = excluded.customName,
                     knobs = excluded.knobs
                 """,
             arguments: [
                 slotIndex, componentType, componentSubType, componentManufacturer,
-                name, gain, mute, rotoColor, customName, knobs,
+                name, gain, mute, pan, solo, rotoColor, customName, knobs,
             ])
     }
 }

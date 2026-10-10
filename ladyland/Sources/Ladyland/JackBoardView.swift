@@ -48,7 +48,7 @@ struct JackBoardView: View {
     // MARK: - 行モデル（`MIDIInput.plan` の結線と対。機材は**セクション単位**）
 
     enum JackID: String, CaseIterable {
-        case synth1, synth2, trackKnobs, drums
+        case synth1, synth2, miniLab, trackKnobs, drums
     }
 
     struct GearRow: Identifiable, Equatable {
@@ -76,9 +76,9 @@ struct JackBoardView: View {
         for (i, source) in sources.enumerated() where source.route == .genericKeyboard {
             rows.append(GearRow(id: "generic.\(i)", gear: source.name, section: "鍵盤（汎用）", jack: .synth1, connected: true))
         }
-        let minilab = sources.contains { $0.route == .secondKeyboard && $0.name.contains("MiniLab") }
+        let minilab = has(.miniLab)
         let ncxse = sources.contains { $0.route == .secondKeyboard && $0.name.contains("NCXse") }
-        rows.append(GearRow(id: "minilab", gear: "MiniLab mkII", section: "鍵盤", jack: .synth2, connected: minilab))
+        rows.append(GearRow(id: "minilab", gear: "MiniLab mkII", section: "鍵盤", jack: .miniLab, connected: minilab))
         rows.append(GearRow(id: "ncxse", gear: "NCXse", section: "鍵盤", jack: .synth2, connected: ncxse))
         for (i, source) in sources.enumerated()
         where source.route == .secondKeyboard && !source.name.contains("MiniLab") && !source.name.contains("NCXse") {
@@ -97,10 +97,26 @@ struct JackBoardView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    appState.panes.open(.xtouch, appState: appState)
+                } label: {
+                    Label("X-Touch → Mixer Surface", systemImage: "slider.horizontal.3")
+                }
+                .help("8ch + Masterの操作と、実機ボタンの割当一覧を開く")
+                .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            .padding(CreoUITokens.spacingS)
+            Divider()
         GeometryReader { geometry in
             switch Self.layout(forWidth: geometry.size.width) {
             case .wide:
-                (desk3D ? AnyView(Desk3DView()) : AnyView(DeskView()))
+                VStack(spacing: 0) {
+                    (desk3D ? AnyView(Desk3DView()) : AnyView(DeskView()))
+                    if desk3D { StudioTrackPanel() }
+                }
                     .overlay(alignment: .topTrailing) {
                         Picker("", selection: $desk3D) {
                             Text("3D").tag(true)
@@ -114,6 +130,7 @@ struct JackBoardView: View {
                     }
             case .sidebar: board
             }
+        }
         }
     }
 
@@ -215,8 +232,11 @@ struct JackBoardView: View {
                 fix: { appState.synthInput1Slot = $0 })
         case .synth2:
             bindableJackCard(
-                title: "鍵盤 2", slot: appState.secondKeyboardSlot,
+                title: "Numa", slot: appState.secondKeyboardSlot,
                 fix: { appState.secondKeyboardSlot = $0 })
+        case .miniLab:
+            bindableJackCard(title: "MiniLab", slot: appState.miniLabSlot,
+                             fix: { appState.miniLabSlot = $0 })
         case .trackKnobs:
             VStack(alignment: .leading, spacing: 2) {
                 Text("Track ノブ")

@@ -26,7 +26,7 @@ struct MIDISourceRouteTests {
         #expect(MIDIInput.route(forSourceName: "Keystage KBD/CTRL", hasKeystage: true) == .keystage)
         #expect(MIDIInput.route(forSourceName: "Keystage DAW IN", hasKeystage: true) == .keystage)
         #expect(MIDIInput.route(forSourceName: "LPD8 mk2", hasKeystage: true) == .drums)
-        #expect(MIDIInput.route(forSourceName: "Arturia MiniLab mkII", hasKeystage: true) == .secondKeyboard)
+        #expect(MIDIInput.route(forSourceName: "Arturia MiniLab mkII", hasKeystage: true) == .miniLab)
         #expect(MIDIInput.route(forSourceName: "NCXse keyboard", hasKeystage: true) == .secondKeyboard)
         #expect(MIDIInput.route(forSourceName: "NCXse controller", hasKeystage: true) == nil, "意図的に繋がない")
     }

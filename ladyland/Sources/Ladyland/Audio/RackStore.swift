@@ -62,6 +62,8 @@ struct SlotSnapshot: Codable {
     /// ミュート（nil = off。ROTO MIXER 冊の TOGGLE ボタンと連動 — 実機が主、
     /// こちらは追従。optional なので導入前の rack.json もそのまま読める）
     var mute: Bool?
+    var pan: Float?
+    var solo: Bool?
 
     /// トラックカラー（ROTO 83 色パレットの index。nil = 未設定）。
     /// 席の属性 — 楽器を差し替えても残る
@@ -103,6 +105,7 @@ struct RackSnapshot: Codable {
     /// 選択した出力デバイスの UID（design/06 §8）。
     /// optional なので導入前の rack.json もそのまま読める（後方互換の慣習）
     var outputDeviceUID: String?
+    var masterGain: Float?
 
     /// LPD8 LED フィードバックのキルスイッチ（design/06 §8。nil = 有効）
     var ledFeedback: Bool?
@@ -126,6 +129,7 @@ struct RackSnapshot: Codable {
     /// 鍵盤 2（NCXse）の担当スロット（nil = 選択に追従。2nd キーボード計画 ②、
     /// 2026-08-10 追加 — mako「別々の二つの音源同時に弾きたい」）
     var secondKeyboardSlot: Int?
+    var miniLabSlot: Int?
 
     /// シンセ入力 1（Keystage）の担当スロット（spec/09 Jack。nil = 選択追従）
     var synthInput1Slot: Int?

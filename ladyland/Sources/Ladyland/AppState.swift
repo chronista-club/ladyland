@@ -26,11 +26,23 @@ final class AppState: ObservableObject {
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
     /// 固定先が選択と割れても正しい席の割当を見る — `drumFaceKnobs` と同じ作法）
     let secondFaceKnobs = FaceKnobController()
+    let miniLabFaceKnobs = FaceKnobController()
+    @Published var studioSelection = StudioTrackSelection()
+    @Published var miniLabSlot: Int? {
+        didSet {
+            guard miniLabSlot != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()
+        }
+    }
     /// 操作面（nanoKONTROL2）のフェーダー → 音量のピックアップ（席ごと。
     /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
     private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
-    let ledBus = LedBus()
+    let midiUse = MIDIUseSession()
+    lazy var xtouch = XTouchController(rack: rack, onSelect: { [weak self] in self?.select($0) },
+        onChange: { [weak self] in self?.scheduleAutosave() })
+    lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
     let roto = RotoService()
     /// Keystage の ARP / CHORD 設定を送り込む常駐（push 型。docs/keystage/README.md）
@@ -107,7 +119,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// 鍵盤 2（NCXse / MiniLab）= シンセ入力 2 の担当スロット（**nil = 選択に
+    /// 鍵盤 2（NCXse）= シンセ入力 2 の担当スロット（**nil = 選択に
     /// 追従**。指定 = その席に固定。2nd キーボード計画 ②、mako 裁定 2026-08-10
     /// 「別々の二つの音源同時に弾きたい」）。タイルの右クリックで固定する
     @Published var secondKeyboardSlot: Int? {
@@ -442,6 +454,8 @@ final class AppState: ObservableObject {
     /// 成功したら差分焼きの影（`rotoDiffShadow`）をここで初期化する —
     /// 以降はライブラベル・カラーの変更が自動で差分焼きされる
     func burnRotoSetups() {
+        let gate = roto.workGate
+        guard let stamp = gate.stamp else { return }
         NSLog("roto: burn 入口")
         rotoBurnResult = "焼き込み中…（数秒。ROTO-SETUP は閉じておく）"
         rotoShadowStatus = .burning("全冊")
@@ -454,6 +468,8 @@ final class AppState: ObservableObject {
         let buttonColor = rotoColors.selectButton
         NSLog("roto: burn 材料そろった — detached へ")
         Task.detached(priority: .userInitiated) {
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             NSLog("roto: burn detached 開始")
             let outcome: (summary: String, requests: [(key: RotoMidiSetupExport.SeatKey, request: [UInt8])]?)
             do {
@@ -469,6 +485,7 @@ final class AppState: ObservableObject {
             }
             NSLog("roto: burn — %@", outcome.summary)
             await MainActor.run {
+                    guard work.isCurrent else { return }
                 self.rotoBurnResult = outcome.summary
                 if let requests = outcome.requests {
                     self.rotoDiffShadow.prime(requests)
@@ -551,6 +568,8 @@ final class AppState: ObservableObject {
     }
 
     private func performRotoLiveBurn() {
+        let gate = roto.workGate
+        guard let stamp = gate.stamp else { return }
         let requests = RotoMidiSetupExport.allRequests(
             slotNames: rotoMixerSlotNames(),
             slotColors: rotoMixerSlotColors(),
@@ -566,6 +585,8 @@ final class AppState: ObservableObject {
         }
         rotoShadowStatus = .burning("\(pending.count) 席")
         Task.detached(priority: .userInitiated) {
+            guard let work = gate.begin(stamp) else { return }
+            defer { work.finish() }
             do {
                 let summary = try RotoMidiSetupExport.burnDiff(pending)
                 NSLog("roto: 差分焼き — %@", summary)
@@ -576,6 +597,7 @@ final class AppState: ObservableObject {
                 // L02 INST #25 / L03 INST2 #2 の冊名割れ）。成功後保存なら
                 // quit で焼きが飛んでもディスクは古いまま = 次回起動で自己修復
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.saveRotoShadow()
                     self.rotoShadowStatus = .synced("\(pending.count) 席 \(Self.shadowClock())")
                 }
@@ -588,6 +610,7 @@ final class AppState: ObservableObject {
                 NSLog("roto: 差分焼き — ポートが取れない（%@）。リトライ",
                     String(describing: underlying))
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.rotoShadowStatus = .portBusy
                     self.loadRotoShadow()
                     self.scheduleRotoLiveBurn()  // → .waiting（primed なら）
@@ -597,6 +620,7 @@ final class AppState: ObservableObject {
                 // 影ごと捨てて差分焼きを黙らせる（全焼きボタンで信頼を再出発）
                 NSLog("roto: 差分焼き失敗 — 影を捨てて停止: %@", String(describing: error))
                 await MainActor.run {
+                    guard work.isCurrent else { return }
                     self.rotoDiffShadow.invalidate()
                     self.saveRotoShadow()
                     self.rotoShadowStatus = .unprimed
@@ -704,6 +728,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
@@ -748,6 +773,7 @@ final class AppState: ObservableObject {
     }
 
     func start() {
+        bindMIDIUseSession()
         startCoreRuntime()
         startFieldProjection()
         observeOutputDevices()
@@ -757,8 +783,57 @@ final class AppState: ObservableObject {
         startKeystageService()
         bindLpd8Editor()
         restoreSession()
+        midiUse.start()
         observeThemeChanges()
         startSelfTestIfRequested()
+    }
+
+    private func bindMIDIUseSession() {
+        let access = midiUse.access
+        MIDISysExSender.setEndpointAccess(input: { access.allowsInput($0) },
+                                         output: { access.allowsOutput($0) })
+        ledBus.setDeviceAvailable(false)
+        midiUse.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        midiUse.onReleased = { [weak self] device in
+            guard let self else { return }
+            self.midi?.refresh()
+            self.router.releaseDevice(device.deviceID)
+            switch device.profileID {
+            case "lpd8":
+                self.ledBus.setDeviceAvailable(false)
+                self.lpd8Editor.releaseDevice()
+            case "roto":
+                self.rotoLiveBurnTask?.cancel()
+                await self.roto.releaseDevice()
+            case "keystage": await self.keystage.releaseDevice()
+            case "xtouch": await self.xtouch.stop()
+            case "nanokontrol": self.surfaceGainPickup.reset()
+            default: break
+            }
+        }
+        midiUse.onAcquired = { [weak self] device in
+            guard let self else { return }
+            switch device.profileID {
+            case "lpd8": self.ledBus.setDeviceAvailable(true)
+            case "roto": self.roto.acquireDevice()
+            case "keystage": self.keystage.acquireDevice()
+            case "xtouch":
+                guard let lease = device.lease?.token else { return }
+                self.xtouch.start(ready: { [weak self] in await self?.restoreTask?.value }) { [weak self] bytes in
+                    guard let self else { throw MIDIUseError.unavailable }
+                    try await self.midiUse.sendXTouch(bytes, lease: lease)
+                }
+            default: break
+            }
+        }
+        midiUse.onSnapshot = { [weak self] snapshot in
+            guard let self else { return }
+            self.midi?.updateDevices(snapshot)
+            self.midiConnectedSources = self.midi?.connectedSources ?? []
+            self.midiConnected = self.midi?.connected ?? []
+        }
     }
 
     /// ログを開いてから Audio / MIDI を起動する。ログの取りこぼしを防ぐため、
@@ -791,7 +866,11 @@ final class AppState: ObservableObject {
 
         do {
             try rack.start()
-            let input = MIDIInput(router: router)
+            let input = MIDIInput(router: router, access: midiUse.access)
+            input.onXTouch = { [weak self] status, a, b in
+                guard let event = XTouchMCU.decode(status, a, b) else { return }
+                self?.xtouch.handle(event)
+            }
             try input.start()
             midi = input
             updateRouting()
@@ -938,7 +1017,8 @@ final class AppState: ObservableObject {
                 let secondName =
                     "slot \(secondIndex + 1) (\(self.rack.slots.indices.contains(secondIndex) ? (self.rack.slots[secondIndex].displayName ?? "empty") : "?"))"
                 let line = MidiTraceFormat.line(
-                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName)
+                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName,
+                    miniLabSlot: "slot \((self.miniLabSlot ?? self.rack.selected) + 1)")
                 self.debugLog.append(line.text, collapseKey: line.key, kind: .midi)
 
                 // ノブページの追従（ノブストリップの見出し）。トレースは
@@ -982,9 +1062,6 @@ final class AppState: ObservableObject {
             }
         })
         midi?.onSetupChanged = { [weak self] in
-            self?.ledBus.reconnect()
-            self?.roto.reconnect()
-            self?.keystage.reconnect()
             // Jack 結線図の接続表示（挿抜で線の色が変わる）
             self?.midiConnectedSources = self?.midi?.connectedSources ?? []
             self?.midiConnected = self?.midi?.connected ?? []
@@ -1050,12 +1127,8 @@ final class AppState: ObservableObject {
     private func bindLpd8Editor() {
         // LPD8 エディタの配線（design/06 §8）: 送信口 / SysEx 受信 /
         // LedBus の suspend 窓 / GET でパッド → ノート対応を実機に追従
-        lpd8Editor.send = { frame in
-            guard let dest = try? MIDISysExSender.destination(matching: "LPD8") else {
-                return false
-            }
-            MIDISysExSender.send(frame, to: dest)
-            return true
+        lpd8Editor.send = { [weak self] frame in
+            self?.midiUse.send(profileID: "lpd8", bytes: frame, completion: {}) ?? false
         }
         lpd8Editor.onBeginSysEx = { [weak self] in self?.ledBus.suspend() }
         lpd8Editor.onEndSysEx = { [weak self] in self?.ledBus.resume() }
@@ -1066,9 +1139,7 @@ final class AppState: ObservableObject {
             self?.updateRouting()  // ノブ CC が変われば横取り集合も変わる
         }
         midi?.sysexRelay.setHandler { [weak self] frame in
-            Task { @MainActor [weak self] in
-                self?.lpd8Editor.handleSysEx(frame)
-            }
+            MainActor.assumeIsolated { self?.lpd8Editor.handleSysEx(frame) }
         }
     }
 
@@ -1121,6 +1192,7 @@ final class AppState: ObservableObject {
             pedalInverted = snapshot.pedalInverted ?? false
             // 鍵盤 2 の固定（nil = 選択に追従。導入前のデータもそのまま）
             secondKeyboardSlot = snapshot.secondKeyboardSlot
+            miniLabSlot = snapshot.miniLabSlot
             // シンセ入力 1 の固定（同上）
             synthInput1Slot = snapshot.synthInput1Slot
             // LPD8 ノブの刺し先（nil = drums = 導入前の挙動）
@@ -1194,6 +1266,7 @@ final class AppState: ObservableObject {
     // MARK: - UI からの操作（すべてここを通す）
 
     func select(_ index: Int) {
+        if studioSelection.pending?.slot != index { studioSelection.cancel() }
         rack.select(index)
         updateRouting()
         flashSelectionLed()
@@ -1201,6 +1274,7 @@ final class AppState: ObservableObject {
     }
 
     func selectNext() {
+        studioSelection.cancel()
         rack.selectNext()
         updateRouting()
         flashSelectionLed()
@@ -1208,6 +1282,7 @@ final class AppState: ObservableObject {
     }
 
     func selectPrevious() {
+        studioSelection.cancel()
         rack.selectPrevious()
         updateRouting()
         flashSelectionLed()
@@ -1216,6 +1291,7 @@ final class AppState: ObservableObject {
 
     /// 選択カーソルの相対移動（Cmd+矢印: ±1 = 左右、±8 = 行ジャンプ）
     func selectOffset(_ delta: Int) {
+        studioSelection.cancel()
         rack.selectOffset(delta)
         updateRouting()
         flashSelectionLed()
@@ -1385,12 +1461,27 @@ final class AppState: ObservableObject {
             return
         }
         let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
+        if windowPlacement.docks?["mixer"] == "nanokontrol.faders" {
+            if (cc == 58 || cc == 59), value > 0 {
+                stepStudioBank(cc == 58 ? -1 : 1)
+                return
+            }
+            if (16..<24).contains(cc), let pending = studioSelection.pending {
+                let column = Int(cc - 16)
+                if bank.indices.contains(column), bank[column] == pending.slot {
+                    studioSelection.turn(slot: pending.slot, value: value)
+                    return
+                }
+            }
+        }
         guard
             let action = SurfaceMapping.action(
                 cc: cc, value: value, docks: windowPlacement.docks ?? [:], bank: bank,
                 page: activeKnobPage ?? rotoPage)
         else { return }
         switch action {
+        case .selectInput(let index):
+            pressStudioSelect(index)
         case .gain(let index, let gain):
             guard rack.slots.indices.contains(index) else { return }
             let slot = rack.slots[index]
@@ -1404,6 +1495,33 @@ final class AppState: ObservableObject {
         case .trackKnob(let seat, let value):
             faceKnobs.handle(knob: seat, value127: Int(value))
             scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
+        }
+    }
+
+    func studioKeyboardSlot(_ keyboard: StudioKeyboard) -> Int? {
+        switch keyboard {
+        case .numa: secondKeyboardSlot
+        case .keystage: synthInput1Slot
+        case .miniLab: miniLabSlot
+        }
+    }
+
+    func studioInputs(for index: Int) -> [StudioKeyboard] {
+        StudioKeyboard.allCases.filter { (studioKeyboardSlot($0) ?? rack.selected) == index }
+    }
+
+    func pressStudioSelect(_ index: Int) {
+        guard rack.slots.indices.contains(index) else { return }
+        // Read the current source before selecting: unbound keyboards follow selection.
+        let current = studioInputs(for: index).first
+        let commit = studioSelection.press(slot: index, current: current)
+        select(index)
+        if let commit {
+            switch commit.keyboard {
+            case .numa: secondKeyboardSlot = commit.slot
+            case .keystage: synthInput1Slot = commit.slot
+            case .miniLab: miniLabSlot = commit.slot
+            }
         }
     }
 
@@ -1450,6 +1568,15 @@ final class AppState: ObservableObject {
                 Task { @MainActor in self?.refreshTransportReadout() }
             }
         }
+    }
+
+    func stepStudioBank(_ direction: Int) {
+        let target = StudioTrackSelection.bankTarget(
+            selected: rack.selected, trackCount: rack.slots.count, direction: direction)
+        guard target != rack.selected else { return }
+        studioSelection.cancel()
+        surfaceGainPickup.reset()
+        select(target)
     }
 
     /// トラックの gain を直接設定する（Track 面のスライダー）
@@ -1669,6 +1796,7 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
         snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
@@ -1714,6 +1842,7 @@ final class AppState: ObservableObject {
                 }
                 if let synth = partial.synthInput1Slot { synthInput1Slot = synth }
                 if let second = partial.secondKeyboardSlot { secondKeyboardSlot = second }
+                if let mini = partial.miniLabSlot { miniLabSlot = mini }
                 if let jack = partial.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) {
                     lpd8KnobJack = jack
                 }
@@ -1888,6 +2017,19 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 secondController.handle(knob: Int(cc), value127: Int(value))
                 self?.scheduleAutosave()  // [常時保存 25] 鍵盤 2 の顔つまみ
+            }
+        }
+
+        let miniSlot = miniLabSlot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil } ?? slot
+        router.setSecondKeyboardTarget(miniSlot.audioUnit as? AVAudioUnitMIDIInstrument, input: .miniLab)
+        miniLabFaceKnobs.focus(miniSlot)
+        let miniCCs = Set(miniSlot.knobMappings.compactMap { UInt8(exactly: $0.knob) })
+            .intersection(secondReachable)
+        let miniController = miniLabFaceKnobs
+        router.setSecondKnobRouting(input: .miniLab, ccs: miniCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                miniController.handle(knob: Int(cc), value127: Int(value))
+                self?.scheduleAutosave()
             }
         }
 

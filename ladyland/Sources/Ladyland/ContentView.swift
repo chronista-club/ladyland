@@ -249,7 +249,7 @@ struct ContentView: View {
                         .help("rail に畳む")
                     }
                     switch assignTab {
-                    case .keystage, .lpd8, .roto, .jack, .mixer:
+                    case .keystage, .lpd8, .roto, .jack, .mixer, .xtouch:
                         // 機材 3 面 + Jack + Mixer は**切り離せる**（PaneWindows）。中身は
                         // SurfaceContent に 1 か所 — サイドバーと別ウィンドウで同じ View
                         if let pane = PaneID(surface: assignTab) {
@@ -635,9 +635,12 @@ struct ContentView: View {
                                     CreoBadge("鍵1", variant: .brand, size: .s, shape: .square)
                                         .help("鍵盤 1（Keystage）はこの席を弾く（右クリックで解除）")
                                 }
+                                if appState.miniLabSlot == slot.index {
+                                    CreoBadge("MiniLab", variant: .brand, size: .s, shape: .square)
+                                }
                                 if appState.secondKeyboardSlot == slot.index {
                                     CreoBadge("鍵2", variant: .brand, size: .s, shape: .square)
-                                        .help("鍵盤 2（NCXse / MiniLab）はこの席を弾く（右クリックで解除）")
+                                        .help("Numaはこの席を弾く（右クリックで解除）")
                                 }
                             }
                             .padding(4)
@@ -655,13 +658,18 @@ struct ContentView: View {
                                 }
                             }
                             if appState.secondKeyboardSlot == slot.index {
-                                Button("鍵盤 2（MiniLab / NCXse）の固定を解除（選択に追従）") {
+                                Button("Numaの固定を解除（選択に追従）") {
                                     appState.secondKeyboardSlot = nil
                                 }
                             } else {
-                                Button("鍵盤 2（MiniLab / NCXse）をこの席に固定") {
+                                Button("Numaをこの席に固定") {
                                     appState.secondKeyboardSlot = slot.index
                                 }
+                            }
+                            if appState.miniLabSlot == slot.index {
+                                Button("MiniLab の固定を解除（選択に追従）") { appState.miniLabSlot = nil }
+                            } else {
+                                Button("MiniLab をこの席に固定") { appState.miniLabSlot = slot.index }
                             }
                             // 席を空にする（今の姿は draft として棚に残る —
                             // タイルメニューから着せ直せる）

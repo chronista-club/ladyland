@@ -1,6 +1,15 @@
 {
-  "originHash" : "469d3ba66039b36727a4196ce2a71c851fb3fa5bd45ec98a2c59d1d9835295a6",
+  "originHash" : "3ec962c3bc2c9dcb99b13127aec1a7e541cdb0a403f9b220b78edba7f8f4eb90",
   "pins" : [
+    {
+      "identity" : "club-unison",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/chronista-club/club-unison.git",
+      "state" : {
+        "revision" : "63eff2ed86846fafd50a726f693e45cfe7e9595d",
+        "version" : "2.0.0"
+      }
+    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
@@ -8,6 +17,14 @@
       "state" : {
         "revision" : "b83108d10f42680d78f23fe4d4d80fc88dab3212",
         "version" : "7.11.1"
+      }
+    },
+    {
+      "identity" : "midistage",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/chronista-club/midistage.git",
+      "state" : {
+        "revision" : "709d111a27ae481eef39aec1d8c2da7f68dfb942"
       }
     },
     {
