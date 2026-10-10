@@ -431,6 +431,7 @@ struct ContentView: View {
                     pedal: appState.pedalMode,
                     clockBPM: appState.clockBPM,
                     tempoSyncEnabled: appState.tempoSyncEnabled,
+                    transport: appState.transportReadout,
                     // 席の明示色（パラメータ色 > 席色）を弧に映し、右クリックで
                     // 付けられる（mako 要望 2026-08-16「アイコンに色をつける動線」）
                     cellColor: { appState.rotoSeatCellColors()[$0] },

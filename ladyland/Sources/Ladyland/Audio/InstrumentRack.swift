@@ -589,6 +589,7 @@ final class InstrumentRack: ObservableObject {
 
         do {
             try engine.start()
+            hostTempo.running = true
         } catch {
             // ⚠️ **fail-open**。明示フォーマットが原因かもしれないので、
             // 従来の繋ぎ方へ戻してもう一度だけ試す。ここも駄目なら呼び出し元へ
@@ -598,6 +599,7 @@ final class InstrumentRack: ObservableObject {
                 error.localizedDescription)
             connectMixerChain(format: nil)
             try engine.start()
+            hostTempo.running = true
         }
         let after = engine.outputNode.outputFormat(forBus: 0)
         NSLog("device[start 後]: %.0f Hz / %u ch", after.sampleRate, after.channelCount)
@@ -628,7 +630,7 @@ final class InstrumentRack: ObservableObject {
             "mixer: 合流点が %.0f Hz のまま — %.0f Hz へ揃え直す",
             current.sampleRate, target.sampleRate)
         let wasRunning = engine.isRunning
-        if wasRunning { engine.stop() }
+        if wasRunning { hostTempo.running = false; engine.stop() }
         connectMixerChain(format: target)
         if restart(wasRunning) { return }
 
@@ -873,7 +875,7 @@ final class InstrumentRack: ObservableObject {
         // **捕まえられない ObjC 例外が、捕まえられる Swift の throw に変わる**。
         // これで fail-open が意図どおり効くようになる
         let wasRunning = engine.isRunning
-        if wasRunning { engine.stop() }
+        if wasRunning { hostTempo.running = false; engine.stop() }
 
         // ⚠️ **合流点も一緒に追従させる**（同じ停止窓に相乗り）。
         // ここを置いていくと `AU 192k → mixer 44.1k → output 192k` の往復が残り、
@@ -960,6 +962,7 @@ final class InstrumentRack: ObservableObject {
         guard wasRunning else { return true }
         do {
             try engine.start()
+            hostTempo.running = true
             return true
         } catch {
             NSLog("sampler: ⚠️ エンジンを掛け直せない — %@", error.localizedDescription)
@@ -1116,6 +1119,8 @@ final class InstrumentRack: ObservableObject {
         // テンポの口は**繋ぐ前に**渡す — render が始まってから差し替えると
         // 別プロセスの AUv3 が落ちる（HostTempo.swift）
         unit.auAudioUnit.musicalContextBlock = hostTempo.musicalContextBlock
+        // transport の口も同じく繋ぐ前に 1 回だけ（design/11）
+        unit.auAudioUnit.transportStateBlock = hostTempo.transportStateBlock
         engine.attach(unit)
 
         // ⚠️ **レートを合わせるのは楽器の種類と無関係**（実測 2026-08-07）。

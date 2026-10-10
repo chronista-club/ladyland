@@ -1455,6 +1455,11 @@ final class AppState: ObservableObject {
 
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
     func handleSurface(cc: UInt8, value: UInt8) {
+        // トランスポート列は机の部品ではない — 部品より先に見る（design/11）
+        if let action = Transport.action(nanoKontrolCC: cc, value: value) {
+            transport(action)
+            return
+        }
         let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
         if windowPlacement.docks?["mixer"] == "nanokontrol.faders" {
             if (cc == 58 || cc == 59), value > 0 {
@@ -1516,6 +1521,51 @@ final class AppState: ObservableObject {
             case .numa: secondKeyboardSlot = commit.slot
             case .keystage: synthInput1Slot = commit.slot
             case .miniLab: miniLabSlot = commit.slot
+            }
+        }
+    }
+
+    // MARK: - トランスポート（design/11。mako 裁定 2026-10-09「Aで進めよう」）
+
+    /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
+    /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
+    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル、<< >> = 小節単位で
+    /// 頭を置き直す（フレーズの中の位置をずらす。スロット移動は TRACK ◀▶ の仕事）
+    func transport(_ action: TransportAction) {
+        switch action {
+        case .play:
+            rack.hostTempo.declareDownbeat()
+            NSLog("transport: PLAY — 小節の頭を宣言")
+        case .stop:
+            rack.hostTempo.resetBeat()
+            panic()
+        case .record:
+            rack.hostTempo.recordArmed.toggle()
+            NSLog("transport: REC 待機 %@", rack.hostTempo.recordArmed ? "on" : "off")
+        case .rewind:
+            rack.hostTempo.shiftDownbeat(bars: -1)
+        case .fastForward:
+            rack.hostTempo.shiftDownbeat(bars: 1)
+        }
+        refreshTransportReadout()
+    }
+
+    /// 画面用の読み出し（小節.拍 / 経過 / REC）。頭がある間だけ 10Hz で更新し、
+    /// 値が変わった時だけ publish（ノブストリップの再描画嵐を避ける）
+    @Published private(set) var transportReadout: TransportReadout?
+    private var transportTicker: Timer?
+
+    private func refreshTransportReadout() {
+        let next = TransportReadout.make(
+            positionSeconds: rack.hostTempo.positionSeconds,
+            bpm: rack.hostTempo.bpm, recordArmed: rack.hostTempo.recordArmed)
+        if next != transportReadout { transportReadout = next }
+        if next == nil {
+            transportTicker?.invalidate()
+            transportTicker = nil
+        } else if transportTicker == nil {
+            transportTicker = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.refreshTransportReadout() }
             }
         }
     }
