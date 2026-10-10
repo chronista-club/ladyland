@@ -40,6 +40,8 @@ final class AppState: ObservableObject {
     private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
     let midiUse = MIDIUseSession()
+    lazy var xtouch = XTouchController(rack: rack, onSelect: { [weak self] in self?.select($0) },
+        onChange: { [weak self] in self?.scheduleAutosave() })
     lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
     let roto = RotoService()
@@ -806,6 +808,7 @@ final class AppState: ObservableObject {
                 self.rotoLiveBurnTask?.cancel()
                 await self.roto.releaseDevice()
             case "keystage": await self.keystage.releaseDevice()
+            case "xtouch": await self.xtouch.stop()
             case "nanokontrol": self.surfaceGainPickup.reset()
             default: break
             }
@@ -816,6 +819,12 @@ final class AppState: ObservableObject {
             case "lpd8": self.ledBus.setDeviceAvailable(true)
             case "roto": self.roto.acquireDevice()
             case "keystage": self.keystage.acquireDevice()
+            case "xtouch":
+                guard let lease = device.lease?.token else { return }
+                self.xtouch.start(ready: { [weak self] in await self?.restoreTask?.value }) { [weak self] bytes in
+                    guard let self else { throw MIDIUseError.unavailable }
+                    try await self.midiUse.sendXTouch(bytes, lease: lease)
+                }
             default: break
             }
         }
@@ -858,6 +867,10 @@ final class AppState: ObservableObject {
         do {
             try rack.start()
             let input = MIDIInput(router: router, access: midiUse.access)
+            input.onXTouch = { [weak self] status, a, b in
+                guard let event = XTouchMCU.decode(status, a, b) else { return }
+                self?.xtouch.handle(event)
+            }
             try input.start()
             midi = input
             updateRouting()

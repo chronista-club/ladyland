@@ -97,6 +97,19 @@ struct JackBoardView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    appState.panes.open(.xtouch, appState: appState)
+                } label: {
+                    Label("X-Touch → Mixer Surface", systemImage: "slider.horizontal.3")
+                }
+                .help("8ch + Masterの操作と、実機ボタンの割当一覧を開く")
+                .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            .padding(CreoUITokens.spacingS)
+            Divider()
         GeometryReader { geometry in
             switch Self.layout(forWidth: geometry.size.width) {
             case .wide:
@@ -117,6 +130,7 @@ struct JackBoardView: View {
                     }
             case .sidebar: board
             }
+        }
         }
     }
 

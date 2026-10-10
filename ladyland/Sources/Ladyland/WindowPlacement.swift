@@ -34,7 +34,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
     // 並び = タブの表示順（mako 裁定 2026-08-14「Track, ROTO, Keystage,
     // LPD8 の順」— 席そのものが先頭、機材があと。Jack（結線図）は末尾）
     // Mixer（8ch。mako 火花 2026-10-01）は席の一覧なので Track の隣
-    case track, mixer, roto, keystage, lpd8, jack
+    case track, mixer, xtouch, roto, keystage, lpd8, jack
 
     /// タブに出す機材名（Track だけ機材ではなく**選択中の席そのもの**）
     var title: String {
@@ -44,6 +44,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .roto: return "ROTO"
         case .track: return "Track"
         case .mixer: return "Mixer"
+        case .xtouch: return "X-Touch"
         case .jack: return "Jack"
         }
     }
@@ -70,6 +71,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .track: return "tag.fill"
         // Mixer = 縦フェーダーの列（DAW のミキサーの形）
         case .mixer: return "slider.vertical.3"
+        case .xtouch: return "slider.horizontal.3"
         // Jack = 結線 — ケーブルの差込口そのもの
         case .jack: return "cable.connector"
         }
@@ -119,7 +121,7 @@ struct WindowPreferences: Codable, Equatable {
 /// Track は選択に張り付く面なので対象外。⚠️ raw 値は `window.json` に入る —
 /// `SurfaceTab` と同じく**追加は安全・改名は危険**（テストで固定）
 enum PaneID: String, Codable, CaseIterable {
-    case jack, keystage, lpd8, roto, mixer
+    case jack, keystage, lpd8, roto, mixer, xtouch
 
     init?(surface: SurfaceTab) {
         switch surface {
@@ -128,6 +130,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .lpd8: self = .lpd8
         case .roto: self = .roto
         case .mixer: self = .mixer
+        case .xtouch: self = .xtouch
         case .track: return nil
         }
     }
@@ -139,6 +142,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .lpd8: return .lpd8
         case .roto: return .roto
         case .mixer: return .mixer
+        case .xtouch: return .xtouch
         }
     }
 
@@ -152,6 +156,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .keystage, .lpd8, .roto: return CGSize(width: 720, height: 640)
         // 8 本のストリップ（64pt + 間隔）が横に収まる幅
         case .mixer: return CGSize(width: 640, height: 360)
+        case .xtouch: return CGSize(width: 900, height: 560)
         }
     }
 
@@ -160,6 +165,7 @@ enum PaneID: String, Codable, CaseIterable {
         case .jack: return CGSize(width: 720, height: 400)
         case .keystage, .lpd8, .roto: return CGSize(width: 480, height: 400)
         case .mixer: return CGSize(width: 600, height: 280)
+        case .xtouch: return CGSize(width: 600, height: 500)
         }
     }
 }

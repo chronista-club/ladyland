@@ -249,7 +249,7 @@ struct ContentView: View {
                         .help("rail に畳む")
                     }
                     switch assignTab {
-                    case .keystage, .lpd8, .roto, .jack, .mixer:
+                    case .keystage, .lpd8, .roto, .jack, .mixer, .xtouch:
                         // 機材 3 面 + Jack + Mixer は**切り離せる**（PaneWindows）。中身は
                         // SurfaceContent に 1 か所 — サイドバーと別ウィンドウで同じ View
                         if let pane = PaneID(surface: assignTab) {

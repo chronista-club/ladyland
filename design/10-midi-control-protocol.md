@@ -72,3 +72,9 @@ Keystage の途中の接続モードは共通サービスが物理送信完了�
 
 関連307テストと、音声/MIDIを起動しない SwiftUI 描画で確認済み。物理機材の入力・音・LED・画面とアプリ間の往復は実機確認待ち。
 Field と MIDI SDK が使う Unison は同じ GitHub package / 2.0.0 に統一し、local/remote の package identity 衝突を避ける。
+
+### 終了・再起動（2026-10-08）
+
+通常終了でSDKのcloseが呼ばれず、再起動したLadylandが旧セッションのQUICタイムアウトまで約27秒待つ事象を確認。
+NSApplicationDelegateのterminateLaterでMIDIUseSession.stopを待ち、投影タスクとSDK接続が閉じてから終了を許可する。
+既存のwillTerminateによるラック保存は維持する。重複した終了要求でも切断処理は一度だけ。
