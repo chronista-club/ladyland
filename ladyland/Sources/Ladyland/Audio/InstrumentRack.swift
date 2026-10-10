@@ -1089,7 +1089,7 @@ final class InstrumentRack: ObservableObject {
         // テンポの口は**繋ぐ前に**渡す — render が始まってから差し替えると
         // 別プロセスの AUv3 が落ちる（HostTempo.swift）
         unit.auAudioUnit.musicalContextBlock = hostTempo.musicalContextBlock
-        // transport の口も同じく繋ぐ前に 1 回だけ（design/09）
+        // transport の口も同じく繋ぐ前に 1 回だけ（design/11）
         unit.auAudioUnit.transportStateBlock = hostTempo.transportStateBlock
         engine.attach(unit)
 

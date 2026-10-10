@@ -25,7 +25,7 @@ final class HostTempo: @unchecked Sendable {
     private let bits: UnsafeMutablePointer<UInt64>
     /// **時間軸の原点**（ナノ秒、`clock` の目盛り、`Int64` のビット列）— 位置が
     /// 最後に進み始めた時刻。エンジンが止まると `accumulatedNanos` へ畳む
-    /// （design/09: 時間軸 = 原点と累積だけ。Pause は作らない）
+    /// （design/11: 時間軸 = 原点と累積だけ。Pause は作らない）
     private let originNanos: UnsafeMutablePointer<UInt64>
     /// 原点より前に積んだ位置（ナノ秒、`Int64` のビット列）。<< >> もここを動かす
     private let accumulatedNanos: UnsafeMutablePointer<UInt64>
@@ -59,7 +59,7 @@ final class HostTempo: @unchecked Sendable {
         stateBits.deallocate()
     }
 
-    // MARK: - トランスポート（design/09）
+    // MARK: - トランスポート（design/11）
 
     /// **再生中 = エンジンが回っている**。`InstrumentRack` が `engine.start()` の後 /
     /// `engine.stop()` の前に書く。Play ボタンはここを触らない
@@ -103,7 +103,7 @@ final class HostTempo: @unchecked Sendable {
     /// **<< / >> = 頭を小節単位で置き直す**（mako 裁定 2026-10-10「それでいこう」）。
     /// 曲は無いので動かせるのは頭の位置だけ — >> は 1 小節先へ（フレーズの中で
     /// 1 小節進む）、<< は 1 小節戻る。位置は負にしない（0 で止まる）。
-    /// 頭が未宣言 / テンポ不明なら何もしない。1 小節 = 4 拍（design/09、4/4 固定）
+    /// 頭が未宣言 / テンポ不明なら何もしない。1 小節 = 4 拍（design/11、4/4 固定）
     func shiftDownbeat(bars: Int) {
         let raw = bits.pointee
         guard declared, raw != 0 else { return }
@@ -177,7 +177,7 @@ final class HostTempo: @unchecked Sendable {
     /// AU へ渡す口。**差し替えない**（上記）。同期なしのときは false を返し、
     /// プラグインに「ホストは知らない」と伝える。
     ///
-    /// 拍位置は **PLAY で宣言した小節の頭**から数える（design/09）。Clock からは
+    /// 拍位置は **PLAY で宣言した小節の頭**から数える（design/11）。Clock からは
     /// テンポしか取れないので、頭は手で教える。未宣言なら 0（従来どおり）。
     /// 拍子は 4/4 固定
     var musicalContextBlock: AUHostMusicalContextBlock {

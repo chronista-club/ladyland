@@ -1,4 +1,4 @@
-//! トランスポートの読み替え（design/09。mako 裁定 2026-10-09「Aで進めよう」）。
+//! トランスポートの読み替え（design/11。mako 裁定 2026-10-09「Aで進めよう」）。
 //!
 //! X-Touch と nanoKONTROL2 には同じ並びの 5 つ（<< / >> / STOP / PLAY / REC）が
 //! 付いている。届き方だけが違う — X-Touch は Mackie Control の Note、nano は CC。
@@ -36,7 +36,7 @@ enum Transport {
     }
 }
 
-/// 画面と X-Touch の 7 セグが読む、時間軸の読み出し（純値。design/09 §6）。
+/// 画面と X-Touch の 7 セグが読む、時間軸の読み出し（純値。design/11 §6）。
 /// 小節.拍は **1 から**数える（DAW の表示に揃える。内部の beatPosition は 0 から）
 struct TransportReadout: Equatable {
     /// 小節（1 から）。テンポ不明なら nil

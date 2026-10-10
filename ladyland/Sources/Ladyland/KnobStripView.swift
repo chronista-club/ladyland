@@ -69,7 +69,7 @@ struct KnobStripView: View {
     var clockBPM: Double?
     /// テンポ同期が入っているか（切っていると数字を淡く出す）
     var tempoSyncEnabled = true
-    /// トランスポート（design/09）。nil = PLAY で頭を宣言していない = 出さない
+    /// トランスポート（design/11）。nil = PLAY で頭を宣言していない = 出さない
     var transport: TransportReadout?
 
     /// 席の明示色（パラメータ色 > 席色。nil = 色なし = 弧は従来のブランド色。
@@ -117,7 +117,7 @@ struct KnobStripView: View {
                                     + "（プラグインは自前の既定で動く）")
                 }
 
-                // **トランスポート**（design/09。mako 2026-10-10「GUIに表示する？」）。
+                // **トランスポート**（design/11。mako 2026-10-10「GUIに表示する？」）。
                 // PLAY で頭を宣言している間だけ、小節.拍（テンポ不明なら経過時間）
                 // と REC 待機の点。増やすのはこの 1 つだけ — ボタンの点灯は実機の
                 // LED と X-Touch の 7 セグに任せる

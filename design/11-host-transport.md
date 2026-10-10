@@ -1,4 +1,4 @@
-# design/09 — ホストのトランスポート（Play とは何か）
+# design/11 — ホストのトランスポート（Play とは何か）
 
 **起票**: mem_1CfrGtjgGHpVdfbyes2P2e
 **ステータス**: Draft（2026-10-09 起工、wip/host-transport）

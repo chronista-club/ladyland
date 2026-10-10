@@ -1379,7 +1379,7 @@ final class AppState: ObservableObject {
 
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
     func handleSurface(cc: UInt8, value: UInt8) {
-        // トランスポート列は机の部品ではない — 部品より先に見る（design/09）
+        // トランスポート列は机の部品ではない — 部品より先に見る（design/11）
         if let action = Transport.action(nanoKontrolCC: cc, value: value) {
             transport(action)
             return
@@ -1407,7 +1407,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - トランスポート（design/09。mako 裁定 2026-10-09「Aで進めよう」）
+    // MARK: - トランスポート（design/11。mako 裁定 2026-10-09「Aで進めよう」）
 
     /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
     /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
