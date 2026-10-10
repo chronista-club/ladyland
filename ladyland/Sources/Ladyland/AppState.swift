@@ -1429,6 +1429,27 @@ final class AppState: ObservableObject {
         case .fastForward:
             rack.hostTempo.shiftDownbeat(bars: 1)
         }
+        refreshTransportReadout()
+    }
+
+    /// 画面用の読み出し（小節.拍 / 経過 / REC）。頭がある間だけ 10Hz で更新し、
+    /// 値が変わった時だけ publish（ノブストリップの再描画嵐を避ける）
+    @Published private(set) var transportReadout: TransportReadout?
+    private var transportTicker: Timer?
+
+    private func refreshTransportReadout() {
+        let next = TransportReadout.make(
+            positionSeconds: rack.hostTempo.positionSeconds,
+            bpm: rack.hostTempo.bpm, recordArmed: rack.hostTempo.recordArmed)
+        if next != transportReadout { transportReadout = next }
+        if next == nil {
+            transportTicker?.invalidate()
+            transportTicker = nil
+        } else if transportTicker == nil {
+            transportTicker = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.refreshTransportReadout() }
+            }
+        }
     }
 
     /// トラックの gain を直接設定する（Track 面のスライダー）

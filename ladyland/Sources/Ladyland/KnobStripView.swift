@@ -69,6 +69,8 @@ struct KnobStripView: View {
     var clockBPM: Double?
     /// テンポ同期が入っているか（切っていると数字を淡く出す）
     var tempoSyncEnabled = true
+    /// トランスポート（design/09）。nil = PLAY で頭を宣言していない = 出さない
+    var transport: TransportReadout?
 
     /// 席の明示色（パラメータ色 > 席色。nil = 色なし = 弧は従来のブランド色。
     /// mako 要望 2026-08-16「アイコンに色をつける動線」— ROTO の LCD と
@@ -113,6 +115,28 @@ struct KnobStripView: View {
                                 ? "Keystage のテンポ。プラグインへ渡している"
                                 : "Keystage のテンポ。**同期は切ってある**"
                                     + "（プラグインは自前の既定で動く）")
+                }
+
+                // **トランスポート**（design/09。mako 2026-10-10「GUIに表示する？」）。
+                // PLAY で頭を宣言している間だけ、小節.拍（テンポ不明なら経過時間）
+                // と REC 待機の点。増やすのはこの 1 つだけ — ボタンの点灯は実機の
+                // LED と X-Touch の 7 セグに任せる
+                if let transport {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                        Text(transport.barBeatText ?? transport.elapsedText)
+                        if transport.recordArmed {
+                            Circle().fill(theme.semanticError).frame(width: 7, height: 7)
+                        }
+                    }
+                    .font(LadylandFont.captionNumber)
+                    .foregroundColor(theme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(theme.surfaceBgEmphasis))
+                    .help(
+                        "PLAY からの位置（小節.拍）。経過 \(transport.elapsedText)"
+                            + (transport.recordArmed ? "。REC 待機中" : ""))
                 }
 
                 // ノートのキープ（ダンパー）— 踏みっぱなしに気づけるよう

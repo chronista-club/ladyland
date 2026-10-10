@@ -25,6 +25,8 @@ X-Touch と nanoKONTROL2 が机に載り、どちらにも同じ並びのトラ�
 > Aで進めよう
 > RECは録音待機にするのが良さそうだね。
 > << と >>は、移動かな。小節単位かな？ → それでいこう
+> 再生押したけど、GUIに表示する？何かしら
+> 内部でタイムラインを持つか。 → （原点と累積だけの最小の時間軸、Pause なし）OK
 
 ## 3. 定義
 
@@ -74,7 +76,29 @@ Keystage      （将来）───────────┘        ↓ AppSta
 - テンポが nil（同期なし）のとき拍を数えない — `musicalContextBlock` は false を返し、
   プラグインは自前の既定で動く
 
-## 5. 既知の限界
+## 5. 時間軸（2026-10-10）
+
+曲は無いが、**原点と累積だけの最小の時間軸**を持つ。位置 = 止まっていた間を除いた
+PLAY からの経過（ナノ秒）。小節.拍も経過時間も、AU の `beatPosition` も全部ここから読む。
+
+- `HostTempo`: `origin`（最後に進み始めた時刻）+ `accumulated`（それ以前の分）+
+  `declared` ビット。エンジンが止まると（`running = false`）経過を累積へ畳み、
+  動き出すと原点を置き直す。<< >> は累積を ±1 小節
+- **Pause は作らない**。Play / Stop の意味はそのまま
+- マーカー（nanoKONTROL2 / X-Touch の MARKER）は時間軸ができた後の最初の候補。
+  サンプル精度の位置と外部クロック（Ladyland が送る側）は必要になるまで持たない
+
+## 6. 表示（2026-10-10）
+
+| 場所 | 出すもの |
+|---|---|
+| 画面（ノブストリップのヘッダー） | PLAY で頭を宣言している間だけ、▶ 小節.拍（テンポ不明なら 分:秒）と REC 待機の赤点。増やすのはこの 1 つ |
+| X-Touch 7 セグ（Time Display） | BEATS = 小節.拍、SMPTE = 経過 分:秒。トランスポート 5 ボタンの LED は受けた Note を送り返す。**wip/xtouch-surface 側で `TransportReadout` を読む** |
+| nanoKONTROL2 | 表示窓なし。ボタン LED は KORG Editor で External LED mode にすれば返せる（未実装） |
+
+`TransportReadout`（純値）が読み出しの正典。小節.拍は 1 から数える。
+
+## 7. 既知の限界
 
 - テンポが変わると拍の数え方が変わる（頭からの経過時間 × 今の BPM）。Keystage の
   Clock は 0.1 秒おきに ±0.5 BPM 揺れうるが、`MidiClockTracker` が平均しているので
@@ -88,3 +112,4 @@ Keystage      （将来）───────────┘        ↓ AppSta
 - 2026-10-09 起工。Draft
 - 2026-10-09 実装: `Transport`（読み替え）/ `HostTempo` の拍・transport 口 / `InstrumentRack` の `running` / `AppState.transport(_:)`。純テスト 15 本 GREEN。nanoKONTROL2 の PLAY / STOP / REC は**実機確認待ち**（X-Touch の受信口は wip/xtouch-surface 側）
 - 2026-10-10 << >> = 小節単位で頭を置き直す（mako「それでいこう」）。`HostTempo.shiftDownbeat(bars:)`
+- 2026-10-10 時間軸（原点 + 累積）へ置き換え、`positionSeconds` / `TransportReadout` / ヘッダーの印。23 テスト GREEN

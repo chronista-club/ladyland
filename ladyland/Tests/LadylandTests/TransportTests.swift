@@ -48,10 +48,12 @@ struct HostBeatTests {
         var now: UInt64 = 1_000_000_000
     }
 
-    private func make(bpm: Double? = 120) -> (HostTempo, Clock) {
+    /// エンジンは回っている前提（再生中 = running。止まっているときの挙動は別テスト）
+    private func make(bpm: Double? = 120, running: Bool = true) -> (HostTempo, Clock) {
         let clock = Clock()
         let tempo = HostTempo(clock: { clock.now })
         tempo.bpm = bpm
+        tempo.running = running
         return (tempo, clock)
     }
 
@@ -148,9 +150,34 @@ struct HostBeatTests {
         #expect(r.ok == false)
     }
 
+    @Test("時間軸 = 原点と累積。エンジンが止まっている間は位置が進まず、再開で続きから")
+    func positionFreezesWhileEngineStopped() {
+        let (tempo, clock) = make(bpm: 120)
+        tempo.declareDownbeat()
+        clock.now += 1_000_000_000  // 2 拍
+        tempo.running = false
+        clock.now += 10_000_000_000  // 止まっている 10 秒は数えない
+        #expect(abs(beats(tempo).beat - 2.0) < 1e-9)
+        #expect(abs((tempo.positionSeconds ?? -1) - 1.0) < 1e-9)
+        tempo.running = true
+        clock.now += 500_000_000  // さらに 1 拍
+        #expect(abs(beats(tempo).beat - 3.0) < 1e-9)
+    }
+
+    @Test("位置（秒）は頭を宣言するまで nil、STOP で nil に戻る")
+    func positionSecondsLifecycle() {
+        let (tempo, clock) = make()
+        #expect(tempo.positionSeconds == nil)
+        tempo.declareDownbeat()
+        clock.now += 2_000_000_000
+        #expect(abs((tempo.positionSeconds ?? -1) - 2.0) < 1e-9)
+        tempo.resetBeat()
+        #expect(tempo.positionSeconds == nil)
+    }
+
     @Test("再生中 = エンジンが回っている。transport の口は moving を返す")
     func movingFollowsEngine() {
-        let (tempo, _) = make()
+        let (tempo, _) = make(running: false)
         #expect(transport(tempo).flags.contains(.moving) == false)
         tempo.running = true
         let r = transport(tempo)
@@ -163,11 +190,39 @@ struct HostBeatTests {
     @Test("REC = 録音待機。transport の口に recording が立つ（実録音はしない）")
     func recordArmFlag() {
         let (tempo, _) = make()
-        tempo.running = true
         #expect(transport(tempo).flags.contains(.recording) == false)
         tempo.recordArmed = true
         #expect(transport(tempo).flags.contains(.recording))
         tempo.recordArmed = false
         #expect(transport(tempo).flags.contains(.recording) == false)
+    }
+}
+
+
+@Suite("トランスポートの読み出し（画面 / 7 セグ用）")
+struct TransportReadoutTests {
+    @Test("頭が無ければ何も出さない")
+    func nothingWithoutHead() {
+        #expect(TransportReadout.make(positionSeconds: nil, bpm: 120, recordArmed: false) == nil)
+    }
+
+    @Test("小節.拍は 1 から数える — 0 秒 = 1.1、120 BPM で 2.5 秒 = 5 拍目 = 2 小節 2 拍目")
+    func barsAndBeatsAreOneBased() {
+        let a = TransportReadout.make(positionSeconds: 0, bpm: 120, recordArmed: false)
+        #expect(a?.bar == 1)
+        #expect(a?.beat == 1)
+        let b = TransportReadout.make(positionSeconds: 2.5, bpm: 120, recordArmed: true)
+        #expect(b?.bar == 2)
+        #expect(b?.beat == 2)
+        #expect(b?.recordArmed == true)
+        #expect(b?.barBeatText == "2.2")
+    }
+
+    @Test("テンポが無ければ拍は出さず、経過時間だけ出す")
+    func elapsedWithoutTempo() {
+        let r = TransportReadout.make(positionSeconds: 125, bpm: nil, recordArmed: false)
+        #expect(r?.bar == nil)
+        #expect(r?.elapsedText == "2:05")
+        #expect(r?.barBeatText == nil)
     }
 }

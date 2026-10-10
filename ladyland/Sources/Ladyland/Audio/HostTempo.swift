@@ -23,14 +23,18 @@ import AudioToolbox
 final class HostTempo: @unchecked Sendable {
     /// `Double` のビット列。0 = 同期なし（プラグインは自前の既定で動く）
     private let bits: UnsafeMutablePointer<UInt64>
-    /// **小節の頭を宣言した時刻**（ナノ秒、`clock` の目盛り。**`Int64` のビット列** —
-    /// << >> で頭を時計の 0 より前に置くことがある）。0 = 未宣言 → 拍は 0
-    /// （design/09: PLAY = 小節の頭を宣言する）
-    private let downbeatNanos: UnsafeMutablePointer<UInt64>
+    /// **時間軸の原点**（ナノ秒、`clock` の目盛り、`Int64` のビット列）— 位置が
+    /// 最後に進み始めた時刻。エンジンが止まると `accumulatedNanos` へ畳む
+    /// （design/09: 時間軸 = 原点と累積だけ。Pause は作らない）
+    private let originNanos: UnsafeMutablePointer<UInt64>
+    /// 原点より前に積んだ位置（ナノ秒、`Int64` のビット列）。<< >> もここを動かす
+    private let accumulatedNanos: UnsafeMutablePointer<UInt64>
     /// transport の状態語。bit0 = エンジン稼働中（= 再生中）、bit1 = 録音待機
     private let stateBits: UnsafeMutablePointer<UInt64>
     private static let movingBit: UInt64 = 1 << 0
     private static let recordingBit: UInt64 = 1 << 1
+    /// PLAY で頭を宣言済み（= 時間軸がある）
+    private static let declaredBit: UInt64 = 1 << 2
 
     /// いまの時刻（ナノ秒）。render スレッドから呼ばれるので mach 時計
     /// （`DispatchTime` = mach_absolute_time 由来）。テストは差し替える
@@ -39,8 +43,10 @@ final class HostTempo: @unchecked Sendable {
     init(clock: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
         bits = .allocate(capacity: 1)
         bits.initialize(to: 0)
-        downbeatNanos = .allocate(capacity: 1)
-        downbeatNanos.initialize(to: 0)
+        originNanos = .allocate(capacity: 1)
+        originNanos.initialize(to: 0)
+        accumulatedNanos = .allocate(capacity: 1)
+        accumulatedNanos.initialize(to: 0)
         stateBits = .allocate(capacity: 1)
         stateBits.initialize(to: 0)
         self.clock = clock
@@ -48,7 +54,8 @@ final class HostTempo: @unchecked Sendable {
 
     deinit {
         bits.deallocate()
-        downbeatNanos.deallocate()
+        originNanos.deallocate()
+        accumulatedNanos.deallocate()
         stateBits.deallocate()
     }
 
@@ -58,7 +65,20 @@ final class HostTempo: @unchecked Sendable {
     /// `engine.stop()` の前に書く。Play ボタンはここを触らない
     var running: Bool {
         get { stateBits.pointee & Self.movingBit != 0 }
-        set { setState(Self.movingBit, newValue) }
+        set {
+            guard newValue != running else { return }
+            // 止まる: 進んだぶんを累積へ畳む。動く: 原点をいまに置く
+            let now = Int64(clock())
+            if declared {
+                if newValue {
+                    origin = now
+                } else {
+                    accumulated += now - origin
+                    origin = now
+                }
+            }
+            setState(Self.movingBit, newValue)
+        }
     }
 
     /// **録音待機**（REC のトグル。実録音はしない — mako 裁定 2026-10-09）
@@ -72,42 +92,61 @@ final class HostTempo: @unchecked Sendable {
         stateBits.pointee = on ? raw | bit : raw & ~bit
     }
 
-    /// **PLAY = 小節の頭を宣言する**。いまを beat 0 とし、以後テンポで数える
+    /// **PLAY = 小節の頭を宣言する**。いまを位置 0 とし、以後エンジンが回っている
+    /// 間だけ進む
     func declareDownbeat() {
-        setDownbeat(Int64(clock()))
-    }
-
-    private var downbeat: Int64 { Int64(bitPattern: downbeatNanos.pointee) }
-    /// 0 は「未宣言」の印なので、ちょうど 0 なら 1 ナノ秒ずらす
-    private func setDownbeat(_ nanos: Int64) {
-        downbeatNanos.pointee = UInt64(bitPattern: nanos == 0 ? 1 : nanos)
+        accumulated = 0
+        origin = Int64(clock())
+        setState(Self.declaredBit, true)
     }
 
     /// **<< / >> = 頭を小節単位で置き直す**（mako 裁定 2026-10-10「それでいこう」）。
-    /// 曲は無いので動かせるのは頭の位置だけ — >> は頭を 1 小節ぶん手前へ
-    /// （フレーズの中で 1 小節先へ進む）、<< は 1 小節ぶん先へ（1 小節戻る）。
-    /// 頭が未来に行くなら「いま」に揃える（拍 0。負の拍は作らない）。
-    /// 未宣言なら何もしない。1 小節 = 4 拍（design/09、4/4 固定）
+    /// 曲は無いので動かせるのは頭の位置だけ — >> は 1 小節先へ（フレーズの中で
+    /// 1 小節進む）、<< は 1 小節戻る。位置は負にしない（0 で止まる）。
+    /// 頭が未宣言 / テンポ不明なら何もしない。1 小節 = 4 拍（design/09、4/4 固定）
     func shiftDownbeat(bars: Int) {
         let raw = bits.pointee
-        guard downbeatNanos.pointee != 0, raw != 0 else { return }
-        let bpm = Double(bitPattern: raw)
-        let barNanos = Int64(4 * 60 / bpm * 1_000_000_000)
+        guard declared, raw != 0 else { return }
+        let barNanos = Int64(4 * 60 / Double(bitPattern: raw) * 1_000_000_000)
         let now = Int64(clock())
-        setDownbeat(min(now, downbeat - Int64(bars) * barNanos))
+        let live = running ? now - origin : 0
+        accumulated = max(-live, accumulated + Int64(bars) * barNanos)
     }
 
-    /// **STOP = 拍を 0 へ**（頭は未宣言に戻る）
+    /// **STOP = 拍を 0 へ**（頭は未宣言に戻る = 時間軸を捨てる）
     func resetBeat() {
-        downbeatNanos.pointee = 0
+        setState(Self.declaredBit, false)
+        accumulated = 0
     }
 
-    /// 頭からの拍数（テンポが分からない / 頭が未宣言なら 0）
+    /// 頭からの位置（秒）。未宣言なら nil。画面と 7 セグはここを読む
+    var positionSeconds: Double? {
+        guard declared else { return nil }
+        return Double(positionNanos(now: Int64(clock()))) / 1_000_000_000
+    }
+
+    private var declared: Bool { stateBits.pointee & Self.declaredBit != 0 }
+    private var origin: Int64 {
+        get { Int64(bitPattern: originNanos.pointee) }
+        set { originNanos.pointee = UInt64(bitPattern: newValue) }
+    }
+    private var accumulated: Int64 {
+        get { Int64(bitPattern: accumulatedNanos.pointee) }
+        set { accumulatedNanos.pointee = UInt64(bitPattern: newValue) }
+    }
+
+    /// 位置（ナノ秒）= 累積 + 動いている間の経過。render から呼ばれる —
+    /// 語を 2 つ読むので最悪 1 ブロックぶん古い組み合わせを見るが、ロックは取らない
+    private func positionNanos(now: Int64) -> Int64 {
+        let raw = stateBits.pointee
+        guard raw & Self.declaredBit != 0 else { return 0 }
+        let live = raw & Self.movingBit != 0 ? now - origin : 0
+        return max(0, accumulated + live)
+    }
+
+    /// 頭からの拍数（テンポ不明 / 未宣言なら 0）
     private func beatPosition(bpm: Double, now: UInt64) -> Double {
-        guard downbeatNanos.pointee != 0 else { return 0 }
-        let elapsed = Int64(now) - downbeat
-        guard elapsed > 0 else { return 0 }
-        return Double(elapsed) / 1_000_000_000 * bpm / 60
+        Double(positionNanos(now: Int64(now))) / 1_000_000_000 * bpm / 60
     }
 
     /// AU へ渡す transport の口。**差し替えない**（`musicalContextBlock` と同じ理由）。

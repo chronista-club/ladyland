@@ -35,3 +35,38 @@ enum Transport {
         return mackie[note]
     }
 }
+
+/// 画面と X-Touch の 7 セグが読む、時間軸の読み出し（純値。design/09 §6）。
+/// 小節.拍は **1 から**数える（DAW の表示に揃える。内部の beatPosition は 0 から）
+struct TransportReadout: Equatable {
+    /// 小節（1 から）。テンポ不明なら nil
+    let bar: Int?
+    /// 小節の中の拍（1〜4）。テンポ不明なら nil
+    let beat: Int?
+    /// 頭からの経過秒
+    let elapsed: Double
+    let recordArmed: Bool
+
+    /// 頭が未宣言（position nil）なら nil = 何も出さない
+    static func make(positionSeconds: Double?, bpm: Double?, recordArmed: Bool) -> TransportReadout? {
+        guard let position = positionSeconds else { return nil }
+        guard let bpm, bpm > 0 else {
+            return TransportReadout(bar: nil, beat: nil, elapsed: position, recordArmed: recordArmed)
+        }
+        let beats = Int((position * bpm / 60).rounded(.down))
+        return TransportReadout(
+            bar: beats / 4 + 1, beat: beats % 4 + 1, elapsed: position, recordArmed: recordArmed)
+    }
+
+    /// "2.2"（小節.拍）。テンポ不明なら nil
+    var barBeatText: String? {
+        guard let bar, let beat else { return nil }
+        return "\(bar).\(beat)"
+    }
+
+    /// "2:05"（分:秒）
+    var elapsedText: String {
+        let total = Int(elapsed.rounded(.down))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
