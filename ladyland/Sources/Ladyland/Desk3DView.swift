@@ -150,10 +150,14 @@ struct Desk3DView: View {
 /// またいで同じものを指すよう `@State` で 1 つだけ持つ
 @MainActor
 final class Desk3DScene {
+    /// 机・棚・環境光の置き場（アプリの産物。studio_export.py の出力）
     private let assetDirectory: URL
+    /// 機材の JSON / USDZ の置き場。midistage の配布物があればそれ（`GearAssets`）
+    private let gearAssetDirectory: URL
 
-    init(gearDirectory: URL = Desk3DScene.gearDirectory) {
+    init(gearDirectory: URL = Desk3DScene.gearDirectory, midistageDirectory: URL = GearAssets.midistageDirectory) {
         assetDirectory = gearDirectory
+        gearAssetDirectory = GearAssets.gearDirectory(studio: gearDirectory, midistage: midistageDirectory)
     }
     /// 机の上の並び（`Gear/desk_layout.json` の写し。無ければ nanoKONTROL2 だけ）
     private(set) var layout = DeskLayout.fallback
@@ -216,9 +220,10 @@ final class Desk3DScene {
         {
             layout = loaded
         }
-        let catalog = Self.catalog(at: assetDirectory)
+        let catalog = Self.catalog(at: gearAssetDirectory)
+        // 机の配置は旧 ID（ncxse / fgdp50）のままでも、midistage の ID（numa / fgdp）で引ける
         placedGears = layout.gear.compactMap { entry in
-            catalog[entry.id].map { entry.placing($0) }
+            GearAssets.lookup(catalog, id: entry.id).map { entry.placing($0) }
         }
 
         // 机の面 — Blender で仕上げた机（接地の暗がり入り）があればそれ
@@ -332,7 +337,7 @@ final class Desk3DScene {
 
     /// 機材 1 台 — 清書した USDZ があればそれ、無ければ下書きから組む
     private func gearEntity(_ blueprint: GearBlueprint, theme: CreoTheme) async -> Entity {
-        let url = assetDirectory.appendingPathComponent("\(blueprint.id).usdz")
+        let url = gearAssetDirectory.appendingPathComponent("\(blueprint.id).usdz")
         if FileManager.default.fileExists(atPath: url.path),
             let loaded = try? await Entity(contentsOf: url)
         {
