@@ -6,7 +6,7 @@
 // brand primary で点灯している = 「選択中の楽器」。アプリを開いたときに
 // 目に入る絵と、Dock のアイコンが同じ語彙になる。
 //
-// 色は creo-ui トークン（Creo エコシステム共通の視覚言語）:
+// 初期色は creo-ui トークン。現在値は assets/brand/source.svg から読む:
 //   背景  colorSurfaceBgBase   #070B14
 //   点灯  colorBrandPrimary    #61C594
 //
@@ -20,15 +20,48 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-let bg = CGColor(red: 0.0275, green: 0.0431, blue: 0.0784, alpha: 1)
-let mint = CGColor(red: 0.3804, green: 0.7725, blue: 0.5804, alpha: 1)
+// 形・色の正本は Generator が保存した SVG の metadata（design/12）。
+// 3D の厚み・照明はプレビュー用。Dock は同じモデルの正面図を使う。
+struct LogoModel: Decodable {
+    let version: Int
+    let gap, radius, inset, plateRadius, dim, glow: Double
+    let litColumn, litRow: Int
+    let color, background: String
+}
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data((message + "\n").utf8)); exit(2)
+}
+let args = CommandLine.arguments
+if args.count < 2 { fail("usage: make-appicon.swift <out.iconset> [source.svg]") }
+let sourceURL = args.count > 2 ? URL(fileURLWithPath: args[2]) :
+    URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("assets/brand/source.svg")
+let svg = try String(contentsOf: sourceURL, encoding: .utf8)
+guard let start = svg.range(of: "<metadata id=\"ladyland-logo-model\">"),
+      let end = svg.range(of: "</metadata>", range: start.upperBound..<svg.endIndex) else {
+    fail("Ladyland の編集用SVGではありません")
+}
+let model = try JSONDecoder().decode(LogoModel.self, from: Data(svg[start.upperBound..<end.lowerBound].utf8))
+guard model.version == 1,
+      (0...0.8).contains(model.gap), (0...0.5).contains(model.radius),
+      (0.05...0.3).contains(model.inset), (0...0.5).contains(model.plateRadius),
+      (0...0.6).contains(model.dim), (0...1.5).contains(model.glow),
+      (0...3).contains(model.litColumn), (0...2).contains(model.litRow) else { fail("SVGの設定値が範囲外です") }
+func rgb(_ hex: String) -> CGColor {
+    guard hex.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) != nil,
+          let value = UInt32(hex.dropFirst(), radix: 16) else { fail("SVGの色が不正です") }
+    return CGColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
+                   green: CGFloat((value >> 8) & 255) / 255,
+                   blue: CGFloat(value & 255) / 255, alpha: 1)
+}
+let bg = rgb(model.background)
+let mint = rgb(model.color)
 
 /// 1 枚描く（size = 正方形の一辺）
 func render(size: CGFloat) -> CGImage? {
     guard
         let context = CGContext(
             data: nil, width: Int(size), height: Int(size), bitsPerComponent: 8,
-            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
 
@@ -40,7 +73,7 @@ func render(size: CGFloat) -> CGImage? {
     let plate = size * 0.80
     let origin = (size - plate) / 2
     let rect = CGRect(x: origin, y: origin, width: plate, height: plate)
-    let plateRadius = plate * 0.2246
+    let plateRadius = plate * model.plateRadius
 
     // 板（暗い盤面）+ ごく薄い縁 = 画面の縁取りに見せる
     let platePath = CGPath(
@@ -58,20 +91,20 @@ func render(size: CGFloat) -> CGImage? {
     // 小さいサイズでも「並び」が読めるよう、間隔は広めに取る
     let columns = 4
     let rows = 3
-    let inset = plate * 0.14
+    let inset = plate * model.inset
     let field = CGRect(
         x: rect.minX + inset, y: rect.minY + inset,
         width: plate - inset * 2, height: plate - inset * 2)
-    let gapRatio: CGFloat = 0.26
+    let gapRatio: CGFloat = model.gap
     let cellWidth = field.width / (CGFloat(columns) + gapRatio * CGFloat(columns - 1))
     let cellHeight = field.height / (CGFloat(rows) + gapRatio * CGFloat(rows - 1))
     let gapX = cellWidth * gapRatio
     let gapY = cellHeight * gapRatio
-    let tileRadius = min(cellWidth, cellHeight) * 0.24
+    let tileRadius = min(cellWidth, cellHeight) * model.radius
 
     // 点灯させる 1 枚（中央やや上 = 目線が最初に行く位置）
-    let litColumn = 1
-    let litRow = 1
+    let litColumn = model.litColumn
+    let litRow = model.litRow
 
     for row in 0..<rows {
         for column in 0..<columns {
@@ -88,14 +121,14 @@ func render(size: CGFloat) -> CGImage? {
                 // 発光: 影を光として使う（Creo の視覚言語 = 暗所で光る）
                 context.saveGState()
                 context.setShadow(
-                    offset: .zero, blur: cellWidth * 0.55, color: mint.copy(alpha: 0.85))
+                    offset: .zero, blur: cellWidth * 0.55, color: mint.copy(alpha: min(model.glow, 1)))
                 context.addPath(path)
                 context.setFillColor(mint)
                 context.fillPath()
                 context.restoreGState()
             } else {
                 context.addPath(path)
-                context.setFillColor(mint.copy(alpha: 0.20)!)
+                context.setFillColor(mint.copy(alpha: model.dim)!)
                 context.fillPath()
             }
         }
