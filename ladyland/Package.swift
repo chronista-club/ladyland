@@ -10,7 +10,7 @@ let package = Package(
         .macOS(.v15)
     ],
     dependencies: [
-        .package(url: "https://github.com/chronista-club/midistage.git", revision: "0d3c3f5e22dac62c0e701daaa17fcd173f41df18"),
+        .package(url: "https://github.com/chronista-club/midistage.git", revision: "709d111a27ae481eef39aec1d8c2da7f68dfb942"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
         // 「path 依存で共有」パターン（cortex ↔ midistage-profiles と同型）

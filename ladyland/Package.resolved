@@ -1,5 +1,5 @@
 {
-  "originHash" : "1acc9fdf879e77ff83e778f8b42c445245cb4d55fd9fe1dabc400ba7eaccb8b7",
+  "originHash" : "3ec962c3bc2c9dcb99b13127aec1a7e541cdb0a403f9b220b78edba7f8f4eb90",
   "pins" : [
     {
       "identity" : "club-unison",
@@ -24,7 +24,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/chronista-club/midistage.git",
       "state" : {
-        "revision" : "0d3c3f5e22dac62c0e701daaa17fcd173f41df18"
+        "revision" : "709d111a27ae481eef39aec1d8c2da7f68dfb942"
       }
     },
     {
