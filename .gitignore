@@ -51,3 +51,6 @@ field/vision/LadylandField.xcodeproj/
 *.blend[0-9]*
 **/__pycache__/
 assets/blender/renders/
+
+# Standalone logo generator output
+output/brand/

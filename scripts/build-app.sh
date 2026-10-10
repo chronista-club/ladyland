@@ -138,7 +138,7 @@ cp "$FIELDD" "$CONTENTS/Resources/fieldd"
 
 echo "==> AppIcon を生成"
 ICONSET="$(mktemp -d)/Ladyland.iconset"
-swift "$REPO_ROOT/scripts/make-appicon.swift" "$ICONSET" >/dev/null
+swift "$REPO_ROOT/scripts/make-appicon.swift" "$ICONSET" "$REPO_ROOT/assets/brand/source.svg" >/dev/null
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
