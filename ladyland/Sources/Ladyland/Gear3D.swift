@@ -163,10 +163,46 @@ enum VirtualComponent: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// 机に置いた機材（机座標 mm での中心）
+/// 水平な機材の姿勢。Blender の Z 回転はアプリの Y 回転と同じ符号。
+struct GearPose {
+    var origin: CGPoint
+    var elevation: Float = 0
+    var yaw: Float = 0
+
+    var position: SIMD3<Float> { [Float(origin.x) / 1000, elevation / 1000, Float(origin.y) / 1000] }
+    var radians: Float { yaw * .pi / 180 }
+
+    func worldPoint(_ local: CGPoint) -> CGPoint {
+        let angle = CGFloat(yaw) * .pi / 180
+        return CGPoint(x: origin.x + cos(angle) * local.x + sin(angle) * local.y,
+                       y: origin.y - sin(angle) * local.x + cos(angle) * local.y)
+    }
+
+    func localPoint(_ world: CGPoint) -> CGPoint {
+        let angle = CGFloat(yaw) * .pi / 180
+        let x = world.x - origin.x, z = world.y - origin.y
+        return CGPoint(x: cos(angle) * x - sin(angle) * z, y: sin(angle) * x + cos(angle) * z)
+    }
+
+    func footprint(size: CGSize) -> CGRect {
+        let points = [-size.width / 2, size.width / 2].flatMap { x in
+            [-size.height / 2, size.height / 2].map { worldPoint(CGPoint(x: x, y: $0)) }
+        }
+        let minX = points.map(\.x).min()!, maxX = points.map(\.x).max()!
+        let minZ = points.map(\.y).min()!, maxZ = points.map(\.y).max()!
+        return CGRect(x: minX, y: minZ, width: maxX - minX, height: maxZ - minZ)
+    }
+}
+
+/// 机に置いた機材（mm）。高さ・回転を省略した既存の机も読める。
 struct PlacedGear {
     let blueprint: GearBlueprint
     let origin: CGPoint
+    var elevation: Float = 0
+    var yaw: Float = 0
+    var height: Float? = nil
+    var pose: GearPose { GearPose(origin: origin, elevation: elevation, yaw: yaw) }
+    var top: Float { (elevation + (height ?? blueprint.size.y)) / 1000 }
 }
 
 enum DockModel {
@@ -178,11 +214,11 @@ enum DockModel {
         -> GearSection?
     {
         for gear in gears {
+            let local = gear.pose.localPoint(point)
             for section in gear.blueprint.sections where component.canDock(on: section) {
                 let rect = gear.blueprint.footprint(of: section)
-                    .offsetBy(dx: gear.origin.x, dy: gear.origin.y)
                     .insetBy(dx: -tolerance, dy: -tolerance)
-                if rect.contains(point) { return section }
+                if rect.contains(local) { return section }
             }
         }
         return nil
@@ -325,6 +361,23 @@ struct DeskLayout {
         let center: CGPoint
         /// 上から見た外形（mm）
         let size: CGSize
+        var elevation: Float = 0
+        var yaw: Float = 0
+        var height: Float? = nil
+        var pose: GearPose { GearPose(origin: center, elevation: elevation, yaw: yaw) }
+        var footprint: CGRect {
+            pose.footprint(size: size)
+        }
+
+        func placing(_ blueprint: GearBlueprint) -> PlacedGear {
+            PlacedGear(blueprint: blueprint, origin: center, elevation: elevation, yaw: yaw, height: height)
+        }
+    }
+    struct Surface {
+        let center: CGPoint
+        let size: CGSize
+        let elevation: Float
+        let thickness: Float
         var footprint: CGRect {
             CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height)
         }
@@ -337,6 +390,21 @@ struct DeskLayout {
     let cameraFrom: SIMD3<Float>
     let cameraAt: SIMD3<Float>
     let fieldOfView: Float
+    var surfaces: [Surface] = []
+    var trayElevation: Float = 0
+    var cameraUp: SIMD3<Float> = [0, 1, 0]
+    var orthographicScale: Float? = nil
+    var cameraScaleIsHorizontal = true
+    var cameraAspectRatio: Float? = nil
+
+    var supportSurfaces: [Surface] {
+        surfaces.isEmpty ? [Surface(center: deskCenter, size: deskSize, elevation: 0, thickness: 10)] : surfaces
+    }
+
+    func trayPosition(_ component: VirtualComponent) -> SIMD3<Float> {
+        let point = tray[component.rawValue] ?? CGPoint(x: component == .mixer ? -120 : 120, y: 115)
+        return [Float(point.x) / 1000, trayElevation / 1000 + 0.004, Float(point.y) / 1000]
+    }
 
     var deskRect: CGRect {
         CGRect(
@@ -346,12 +414,23 @@ struct DeskLayout {
 
     private struct JSON: Decodable {
         struct Desk: Decodable { let center: [Double]; let size: [Double] }
-        struct Gear: Decodable { let id: String; let center: [Double]; let size: [Double] }
-        struct Camera: Decodable { let from: [Float]; let at: [Float]; let fov: Float }
+        struct Gear: Decodable {
+            let id: String; let center: [Double]; let size: [Double]
+            let elevation: Float?; let yaw: Float?; let height: Float?
+        }
+        struct Surface: Decodable {
+            let center: [Double]; let size: [Double]; let elevation: Float; let thickness: Float
+        }
+        struct Camera: Decodable {
+            let from: [Float]; let at: [Float]; let fov: Float
+            let up: [Float]?; let projection: String?; let orthographicScale: Float?; let scaleDirection: String?; let aspectRatio: Float?
+        }
         let desk: Desk
         let gear: [Gear]
         let tray: [String: [Double]]
         let camera: Camera
+        let surfaces: [Surface]?
+        let trayElevation: Float?
     }
 
     static func decode(_ data: Data) throws -> DeskLayout {
@@ -362,10 +441,19 @@ struct DeskLayout {
             deskSize: CGSize(width: j.desk.size[0], height: j.desk.size[1]),
             gear: j.gear.map {
                 Entry(id: $0.id, center: CGPoint(x: $0.center[0], y: $0.center[1]),
-                      size: CGSize(width: $0.size[0], height: $0.size[1]))
+                      size: CGSize(width: $0.size[0], height: $0.size[1]),
+                      elevation: $0.elevation ?? 0, yaw: $0.yaw ?? 0, height: $0.height)
             },
             tray: j.tray.mapValues { CGPoint(x: $0[0], y: $0[1]) },
-            cameraFrom: mm(j.camera.from), cameraAt: mm(j.camera.at), fieldOfView: j.camera.fov)
+            cameraFrom: mm(j.camera.from), cameraAt: mm(j.camera.at), fieldOfView: j.camera.fov,
+            surfaces: (j.surfaces ?? []).map {
+                Surface(center: CGPoint(x: $0.center[0], y: $0.center[1]), size: CGSize(width: $0.size[0], height: $0.size[1]),
+                        elevation: $0.elevation, thickness: $0.thickness)
+            },
+            trayElevation: j.trayElevation ?? 0,
+            cameraUp: j.camera.up.map { SIMD3($0[0], $0[1], $0[2]) } ?? [0, 1, 0],
+            orthographicScale: j.camera.projection == "orthographic" ? j.camera.orthographicScale.map { $0 / 1000 } : nil,
+            cameraScaleIsHorizontal: j.camera.scaleDirection != "vertical", cameraAspectRatio: j.camera.aspectRatio)
     }
 
     /// 並びが見つからないとき — nanoKONTROL2 だけを机の真ん中に

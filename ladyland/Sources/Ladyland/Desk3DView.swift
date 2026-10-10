@@ -12,7 +12,7 @@
 //! - 載せた後は実機の操作子が部品の操作になる（`SurfaceMapping`）。机の上の
 //!   フェーダーのつまみは**いまの音量**の位置に立つ（仮想層が物理の姿に重なる）
 //!
-//! 単位はメートル（下書きの mm ÷ 1000）。机の面が y = 0、奥が −z
+//! 単位はメートル（下書きの mm ÷ 1000）。Y が高さ、奥が −Z。
 
 import CreoUI
 import ImageIO
@@ -74,6 +74,26 @@ enum Desk3DMath {
     static func millimeters(_ point: SIMD3<Float>) -> CGPoint {
         CGPoint(x: CGFloat((point.x * 1000).rounded()), y: CGFloat((point.z * 1000).rounded()))
     }
+
+    /// Blender は撮影範囲の全幅、RealityKit は半幅。縦横比が違えば撮影範囲全体を収める。
+    static func cameraScale(span: Float, horizontal: Bool, sourceAspect: Float?, viewport: CGSize) -> Float {
+        guard let sourceAspect, sourceAspect > 0, viewport.width > 0, viewport.height > 0 else { return span / 2 }
+        let aspect = Float(viewport.width / viewport.height)
+        return span / 2 * (horizontal ? max(1, aspect / sourceAspect) : max(1, sourceAspect / aspect))
+    }
+
+    /// 高さの違う棚へ同じ水平面で投影すると、見えている操作子からドロップがずれる。
+    /// 各機材の天面へ投影し、手前の載せ先を選ぶ。
+    static func dropTarget(
+        for component: VirtualComponent, origin: SIMD3<Float>, direction: SIMD3<Float>, gears: [PlacedGear]
+    ) -> (section: GearSection, point: SIMD3<Float>)? {
+        gears.compactMap { gear -> (section: GearSection, point: SIMD3<Float>)? in
+            guard let hit = intersect(origin: origin, direction: direction, planeY: gear.top),
+                  let section = DockModel.section(for: component, at: millimeters(hit), gears: [gear])
+            else { return nil }
+            return (section, hit)
+        }.min { simd_length_squared($0.point - origin) < simd_length_squared($1.point - origin) }
+    }
 }
 
 struct Desk3DView: View {
@@ -82,47 +102,46 @@ struct Desk3DView: View {
     @State private var scene = Desk3DScene()
 
     var body: some View {
-        RealityView { content in
-            let root = await scene.build(theme: theme)
-            content.add(root)
-            scene.subscription = content.subscribe(to: SceneEvents.Update.self) { [weak appState] _ in
-                guard let appState else { return }
-                scene.tick(appState: appState)
+        GeometryReader { [appState] geometry in
+            RealityView { [weak appState] content in
+                let root = await scene.build(theme: theme)
+                scene.resizeCamera(to: geometry.size)
+                content.add(root)
+                scene.subscription = content.subscribe(to: SceneEvents.Update.self) { [weak appState] _ in
+                    guard let appState else { return }
+                    scene.tick(appState: appState)
+                }
             }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .targetedToAnyEntity()
-                .onChanged { value in
-                    guard let component = Desk3DScene.component(of: value.entity),
-                        let ray = value.ray(through: value.location, in: .local, to: .scene),
-                        let hit = Desk3DMath.intersect(
-                            origin: ray.origin, direction: ray.direction, planeY: Desk3DScene.hoverY)
-                    else { return }
-                    scene.drag(component, to: hit)
-                }
-                .onEnded { value in
-                    guard let component = Desk3DScene.component(of: value.entity) else { return }
-                    let point = scene.dragPoint(component).map(Desk3DMath.millimeters)
-                    let section = point.flatMap {
-                        DockModel.section(for: component, at: $0, gears: scene.placedGears)
+            .onChange(of: geometry.size) { _, size in scene.resizeCamera(to: size) }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .targetedToAnyEntity()
+                    .onChanged { value in
+                        guard let component = Desk3DScene.component(of: value.entity),
+                            let ray = value.ray(through: value.location, in: .local, to: .scene)
+                        else { return }
+                        scene.drag(component, origin: ray.origin, direction: ray.direction)
                     }
-                    let before = appState.windowPlacement.docks?[component.rawValue]
-                    appState.windowPlacement.setDock(component, on: section?.id)
-                    // LPD8 のノブ列に Track ノブを載せる = LPD8 のノブを Track ノブへ刺す
-                    if component == .trackKnobs,
-                        let jack = DockModel.lpd8Jack(before: before, after: section?.id)
-                    {
-                        appState.lpd8KnobJack = jack
+                    .onEnded { value in
+                        guard let component = Desk3DScene.component(of: value.entity) else { return }
+                        let section = scene.dragSection(component)
+                        let before = appState.windowPlacement.docks?[component.rawValue]
+                        appState.windowPlacement.setDock(component, on: section)
+                        // LPD8 のノブ列に Track ノブを載せる = LPD8 のノブを Track ノブへ刺す
+                        if component == .trackKnobs,
+                            let jack = DockModel.lpd8Jack(before: before, after: section)
+                        {
+                            appState.lpd8KnobJack = jack
+                        }
+                        scene.endDrag(component)
                     }
-                    scene.endDrag(component)
-                }
-        )
-        .overlay(alignment: .bottomLeading) {
-            Text("部品を掴んで機材の上へ。合う場所にだけ載る（外すときは手前へ）")
-                .font(LadylandFont.deskCaption)
-                .foregroundColor(theme.textTertiary)
-                .padding(CreoUITokens.spacingS)
+            )
+            .overlay(alignment: .bottomLeading) {
+                Text("部品を掴んで機材の上へ。合う場所にだけ載る（外すときは手前へ）")
+                    .font(LadylandFont.deskCaption)
+                    .foregroundColor(theme.textTertiary)
+                    .padding(CreoUITokens.spacingS)
+            }
         }
     }
 }
@@ -131,9 +150,11 @@ struct Desk3DView: View {
 /// またいで同じものを指すよう `@State` で 1 つだけ持つ
 @MainActor
 final class Desk3DScene {
-    /// 掴んだ部品が浮く高さ（m）— 一番背の高い機材（Keystage 82 mm）より上
-    static let hoverY: Float = 0.12
+    private let assetDirectory: URL
 
+    init(gearDirectory: URL = Desk3DScene.gearDirectory) {
+        assetDirectory = gearDirectory
+    }
     /// 机の上の並び（`Gear/desk_layout.json` の写し。無ければ nanoKONTROL2 だけ）
     private(set) var layout = DeskLayout.fallback
     /// 机に置いた機材（机座標 mm での中心）
@@ -153,6 +174,7 @@ final class Desk3DScene {
     private var wraps: [VirtualComponent: (entity: Entity, section: String)] = [:]
     /// 機材の外形（机の座標 m）— 帯の寸法と浮く高さに使う
     private var gearBounds: [String: BoundingBox] = [:]
+    private var gearEntities: [String: Entity] = [:]
     /// M ボタンの元の材質（清書した USDZ の材質に戻すため）
     private var muteNormal: [Int: [any RealityKit.Material]] = [:]
     private var light: Entity?
@@ -166,13 +188,14 @@ final class Desk3DScene {
         return nil
     }
     private var dragging: [VirtualComponent: SIMD3<Float>] = [:]
+    private var dragTargets: [VirtualComponent: String] = [:]
 
     // MARK: - 組み立て
 
     /// 机に置く機材を集める — nanoKONTROL2 は下書き（Swift）、ほかは Blender の配置データ
-    static func catalog() -> [String: GearBlueprint] {
+    static func catalog(at directory: URL = gearDirectory) -> [String: GearBlueprint] {
         var all: [String: GearBlueprint] = ["nanokontrol": .nanoKontrol2]
-        let files = (try? FileManager.default.contentsOfDirectory(at: gearDirectory, includingPropertiesForKeys: nil)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for url in files where url.pathExtension == "json" && url.lastPathComponent != "desk_layout.json" {
             if let data = try? Data(contentsOf: url), let blueprint = try? GearBlueprint.decode(data) {
                 all[blueprint.id] = blueprint
@@ -188,41 +211,52 @@ final class Desk3DScene {
         let lit = SimpleMaterial(color: NSColor(theme.semanticError), roughness: 0.4, isMetallic: false)
         buttonMaterials = (lit, lit)
 
-        if let data = try? Data(contentsOf: Self.gearDirectory.appendingPathComponent("desk_layout.json")),
+        if let data = try? Data(contentsOf: assetDirectory.appendingPathComponent("desk_layout.json")),
             let loaded = try? DeskLayout.decode(data)
         {
             layout = loaded
         }
-        let catalog = Self.catalog()
+        let catalog = Self.catalog(at: assetDirectory)
         placedGears = layout.gear.compactMap { entry in
-            catalog[entry.id].map { PlacedGear(blueprint: $0, origin: entry.center) }
+            catalog[entry.id].map { entry.placing($0) }
         }
 
         // 机の面 — Blender で仕上げた机（接地の暗がり入り）があればそれ
-        if let desk = try? await Entity(contentsOf: Self.gearDirectory.appendingPathComponent("desk.usdz")) {
+        if let desk = try? await Entity(contentsOf: assetDirectory.appendingPathComponent("desk.usdz")) {
             root.addChild(desk)
         } else {
-            let size = layout.deskSize
-            let desk = ModelEntity(
-                mesh: .generateBox(
-                    width: Float(size.width) / 1000, height: 0.01, depth: Float(size.height) / 1000, cornerRadius: 0.004),
-                materials: [SimpleMaterial(color: NSColor(theme.surfaceBgSubtle), roughness: 0.9, isMetallic: false)])
-            desk.position = [Float(layout.deskCenter.x) / 1000, -0.005, Float(layout.deskCenter.y) / 1000]
-            root.addChild(desk)
+            for surface in layout.supportSurfaces {
+                let desk = ModelEntity(
+                    mesh: .generateBox(
+                        width: Float(surface.size.width) / 1000, height: surface.thickness / 1000,
+                        depth: Float(surface.size.height) / 1000, cornerRadius: 0.004),
+                    materials: [SimpleMaterial(color: NSColor(theme.surfaceBgSubtle), roughness: 0.9, isMetallic: false)])
+                desk.position = [Float(surface.center.x) / 1000, (surface.elevation - surface.thickness / 2) / 1000,
+                                 Float(surface.center.y) / 1000]
+                root.addChild(desk)
+            }
         }
 
         // 機材
         for gear in placedGears {
-            let entity = await gearEntity(gear.blueprint, theme: theme)
-            entity.position = [Float(gear.origin.x) / 1000, 0, Float(gear.origin.y) / 1000]
+            // USDZ 自体の軸変換は内側に保ち、アプリでの配置は外側で一度だけ掛ける。
+            let model = await gearEntity(gear.blueprint, theme: theme)
+            let entity = Entity()
+            entity.name = gear.blueprint.id
+            model.name = "model"
+            entity.addChild(model)
+            entity.position = gear.pose.position
+            entity.orientation = simd_quatf(angle: gear.pose.radians, axis: [0, 1, 0])
             root.addChild(entity)
-            gearBounds[gear.blueprint.id] = entity.visualBounds(relativeTo: root)
+            gearEntities[gear.blueprint.id] = entity
+            gearBounds[gear.blueprint.id] = entity.visualBounds(relativeTo: entity)
         }
 
         // 仮想の部品
         for component in VirtualComponent.allCases {
             let entity = componentEntity(component, theme: theme)
             components[component] = entity
+            entity.position = restingPosition(component)
             root.addChild(entity)
         }
 
@@ -230,7 +264,7 @@ final class Desk3DScene {
         // しっかり落とし込む。各クライアントは微調整くらい」）。Blender が書いた
         // 環境マップで照らし、こちらで足すのは明るさの微調整（`exposure`）だけ。
         // 無ければ仮のライト
-        if let environment = await Self.loadEnvironment() {
+        if let environment = await Self.loadEnvironment(at: assetDirectory) {
             let light = Entity()
             light.name = "environment"
             light.components.set(
@@ -244,23 +278,41 @@ final class Desk3DScene {
             sun.look(at: [0, 0, 0], from: [0.3, 0.8, 0.5], relativeTo: nil)
             root.addChild(sun)
         }
-        let camera = PerspectiveCamera()
-        camera.camera.fieldOfViewInDegrees = layout.fieldOfView
-        camera.look(at: layout.cameraAt, from: layout.cameraFrom, relativeTo: nil)
+        let camera = Entity()
+        camera.name = "studio.camera"
+        if let scale = layout.orthographicScale {
+            var lens = OrthographicCameraComponent()
+            lens.scale = scale / 2
+            lens.scaleDirection = layout.cameraScaleIsHorizontal ? .horizontal : .vertical
+            lens.near = 0.01
+            lens.far = 100
+            camera.components.set(lens)
+        } else {
+            camera.components.set(PerspectiveCameraComponent(fieldOfViewInDegrees: layout.fieldOfView))
+        }
+        camera.look(at: layout.cameraAt, from: layout.cameraFrom, upVector: layout.cameraUp, relativeTo: nil)
         root.addChild(camera)
         return root
     }
 
+    func resizeCamera(to viewport: CGSize) {
+        guard let span = layout.orthographicScale, let camera = root.findEntity(named: "studio.camera"),
+              var lens = camera.components[OrthographicCameraComponent.self] else { return }
+        lens.scale = Desk3DMath.cameraScale(span: span, horizontal: layout.cameraScaleIsHorizontal,
+                                           sourceAspect: layout.cameraAspectRatio, viewport: viewport)
+        camera.components.set(lens)
+    }
+
     /// Blender から来る資産の置き場（`Gear/*.py` が書く）
-    static let gearDirectory = FileManager.default.homeDirectoryForCurrentUser
+    nonisolated static let gearDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/ladyland/gear")
 
     /// 環境マップの明るさの微調整（2 の冪。0 = Blender のまま）
     static let exposure: Float = 0
 
     /// Blender が撮った全周（`environment.exr`）→ 環境光
-    static func loadEnvironment() async -> EnvironmentResource? {
-        let url = gearDirectory.appendingPathComponent("environment.exr")
+    static func loadEnvironment(at directory: URL = gearDirectory) async -> EnvironmentResource? {
+        let url = directory.appendingPathComponent("environment.exr")
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return nil }
@@ -280,7 +332,7 @@ final class Desk3DScene {
 
     /// 機材 1 台 — 清書した USDZ があればそれ、無ければ下書きから組む
     private func gearEntity(_ blueprint: GearBlueprint, theme: CreoTheme) async -> Entity {
-        let url = Self.gearDirectory.appendingPathComponent("\(blueprint.id).usdz")
+        let url = assetDirectory.appendingPathComponent("\(blueprint.id).usdz")
         if FileManager.default.fileExists(atPath: url.path),
             let loaded = try? await Entity(contentsOf: url)
         {
@@ -391,7 +443,7 @@ final class Desk3DScene {
     }
 
     /// 載った先の機材を**機材ごと**包む帯（mako 赤入れ 2026-10-04: 左端まで覆う / 上の面は薄く）
-    private func wrapEntity(_ component: VirtualComponent, section: String) -> Entity? {
+    func wrapEntity(_ component: VirtualComponent, section: String) -> Entity? {
         guard
             let gear = placedGears.first(where: { g in g.blueprint.sections.contains { $0.id == section } }),
             let bounds = gearBounds[gear.blueprint.id]
@@ -403,6 +455,8 @@ final class Desk3DScene {
         let frames = Desk3DMath.sleeve(
             section: rect, gearMinZ: bounds.min.z, gearMaxZ: bounds.max.z, top: bounds.max.y)
         let wrap = Entity()
+        wrap.position = gear.pose.position
+        wrap.orientation = simd_quatf(angle: gear.pose.radians, axis: [0, 1, 0])
         for (name, frame) in frames {
             let piece = ModelEntity(
                 mesh: .generateBox(size: frame.size, cornerRadius: 0.0005),
@@ -460,8 +514,8 @@ final class Desk3DScene {
             let faderKey = Self.key("nanokontrol", "fader_\(n)")
             if let fader = parts[faderKey], let home = partHome[faderKey] {
                 let gain = mixerOnFaders ? (slot?.gain ?? 0) : 0.5
-                // 机の「奥」（-z）を部品の親の座標へ直してから動かす
-                let back = fader.parent?.convert(direction: [0, 0, -1], from: nil) ?? [0, 0, -1]
+                // 機材の「奥」（ローカル -z）を部品の親へ直す。棚上で回しても方向を保つ。
+                let back = gearEntities["nanokontrol"]?.convert(direction: [0, 0, -1], to: fader.parent) ?? [0, 0, -1]
                 // 可動幅は下書きの値（写真のトレースで 30 mm）
                 let travel = (nano?.parts.first { $0.name == "fader_\(n)" }?.travel ?? 30) / 1000
                 fader.position = home + Desk3DMath.faderOffset(gain: gain, travel: travel, back: back)
@@ -481,9 +535,7 @@ final class Desk3DScene {
 
     /// 部品の置き場（並びの tray。机の上に平らに置く）
     private func restingPosition(_ component: VirtualComponent) -> SIMD3<Float> {
-        let point = layout.tray[component.rawValue]
-            ?? CGPoint(x: component == .mixer ? -120 : 120, y: 115)
-        return [Float(point.x) / 1000, 0.004, Float(point.y) / 1000]
+        layout.trayPosition(component)
     }
 
     // MARK: - ドラッグ
@@ -501,15 +553,24 @@ final class Desk3DScene {
         return nil
     }
 
-    func drag(_ component: VirtualComponent, to point: SIMD3<Float>) {
-        dragging[component] = point
+    func drag(_ component: VirtualComponent, origin: SIMD3<Float>, direction: SIMD3<Float>) {
+        let target = Desk3DMath.dropTarget(for: component, origin: origin, direction: direction, gears: placedGears)
+        dragTargets[component] = target?.section.id
+        if let target {
+            dragging[component] = target.point + [0, 0.008, 0]
+        } else if let hit = Desk3DMath.intersect(
+            origin: origin, direction: direction, planeY: layout.trayElevation / 1000 + 0.12)
+        {
+            dragging[component] = hit
+        }
     }
 
-    func dragPoint(_ component: VirtualComponent) -> SIMD3<Float>? {
-        dragging[component]
+    func dragSection(_ component: VirtualComponent) -> String? {
+        dragTargets[component]
     }
 
     func endDrag(_ component: VirtualComponent) {
         dragging[component] = nil
+        dragTargets[component] = nil
     }
 }

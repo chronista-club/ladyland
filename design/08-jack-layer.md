@@ -41,6 +41,21 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1i. **編集した studio をアプリへ(2026-10-07)**: `assets/blender/scenes/studio.blend` を
+    配置の正本にする。`Gear/studio_export.py` が静的家具 `desk.usdz`、機材ごとの USDZ、
+    環境光、配置 JSON を書く。編集済みメッシュを再生成・上書きしない。
+    `DeskLayout` は棚の高さ、機材の Y 軸回転、実寸の高さ、置き場の高さ、平行投影を読む。
+    省略時は従来の高さ 0・回転 0・透視投影。Blender `(x,y,z)` m → アプリ `(x,z,-y)` m。
+    載せ先判定は画面の光線を各機材の天面へ投影して機材ローカルへ逆変換する。
+    帯は機材ローカルに組み、機材と同じ高さ・向きへ置く。フェーダーの奥も機材の向きに従う。
+    機材・家具の USDZ と JSON は同じ書き出し単位で配置する。旧アプリの実行中に
+    高さ付き JSON だけを入れ替えない。未対応の傾斜・拡縮・レンズシフトは書き出しで拒否する。
+1h. **X-TOUCH を追加(2026-10-06)**: 標準の 452 × 301 × 100 mm モデル。
+    `Gear/xtouch.json` に 8 チャンネル＋マスターの 100 mm フェーダー、8 エンコーダー、
+    液晶、メーター、トランスポート、ジョグを定義する。筐体の傾斜と背面端子は簡略化。
+    机を横に広げて左側へ置く。フェーダー 8 本とノブ 8 個は別セクションとし、
+    MCU/HUI の MIDI 制御は接続しない（CC は空）。`.blend` は `assets/blender/gear/`、リンク配置した空間は
+    `assets/blender/scenes/studio.blend` で管理する。USDZ はアプリの Application Support に置く。
 1g. **机に 7 台(2026-10-05、mako「3D の机に全部載せて」)**: 並びは `Gear/desk_layout.json`
     (アプリと Blender の両方が読む。机の大きさ・各機材の中心・部品の置き場・カメラ)。
     `gear_build.py` は USDZ と一緒に配置データ(JSON、鍵盤は展開済み)を書き出し、アプリは
