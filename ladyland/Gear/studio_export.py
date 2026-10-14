@@ -1,4 +1,5 @@
-"""編集済み studio を Ladyland へ渡す。機材・家具の再生成、blend の保存はしない。
+"""編集済み studio を Ladyland へ渡す（机・棚の desk.usdz、environment.exr、desk_layout.json）。
+機材の USDZ / JSON は midistage の gear/build.py が書く。機材・家具の再生成、blend の保存はしない。
 
 Blender --background --python ladyland/Gear/studio_export.py -- --output /tmp/studio-gear
 確認した出力を Application Support/ladyland/gear へ配置する。
@@ -13,7 +14,7 @@ import re
 import sys
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Vector
 
 HERE = Path(__file__).resolve().parent
 STUDIO = HERE.parents[1] / "assets/blender/scenes/studio.blend"
@@ -216,12 +217,13 @@ def export_assets(source, output, bake=True):
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     layout = layout_from_scene(scene)
-    libraries = {}
+    # 機材は midistage の配布物（~/Library/Application Support/midistage/gear/<id>.blend）を
+    # リンクする。機材の USDZ / JSON は midistage の build.py が書くので、ここでは書き出さない
     for instance in gear_instances(scene):
         library = instance.instance_collection.library
-        if library is None:
-            raise ValueError(f"機材は gear/<id>.blend にリンクしてください: {instance.name}")
-        libraries[instance.name] = (Path(bpy.path.abspath(library.filepath)), instance.instance_collection.name)
+        if library is None or not Path(bpy.path.abspath(library.filepath)).exists():
+            raise ValueError(
+                f"機材は midistage の配布物 <id>.blend にリンクしてください（build.py を先に）: {instance.name}")
     if set(layout["tray"]) != {"mixer", "trackKnobs"}:
         raise ValueError("mixer と trackKnobs の置き場を指定してください")
     output.mkdir(parents=True, exist_ok=True)
@@ -230,18 +232,6 @@ def export_assets(source, output, bake=True):
     furniture = [o for o in scene.objects if o.type == "MESH" and not o.hide_render]
     export_usdz(furniture, output / "desk.usdz")
     render_environment(scene, output)
-    sys.path.insert(0, str(HERE))
-    import gear_build
-    for gid, (library, collection_name) in libraries.items():
-        bpy.ops.wm.open_mainfile(filepath=str(library))
-        collection = bpy.data.collections[collection_name]
-        root = bpy.data.objects.get(gid)
-        if root is None or any(abs(a - b) > 1e-6 for row_a, row_b in zip(root.matrix_world, Matrix.Identity(4)) for a, b in zip(row_a, row_b)):
-            raise ValueError(f"機材単体の原点・回転・縮尺を確認してください: {gid}")
-        export_usdz(collection.all_objects, output / f"{gid}.usdz")
-        if gid != "nanokontrol":
-            spec = gear_build.load_spec(gid)
-            (output / f"{gid}.json").write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n")
     (output / "desk_layout.json").write_text(json.dumps(layout, ensure_ascii=False, indent=2) + "\n")
     return layout
 
@@ -253,7 +243,7 @@ def main():
     parser.add_argument("--skip-bake", action="store_true", help="配置・材質確認用（接地 AO を省略）")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     layout = export_assets(args.scene.resolve(), args.output.resolve(), bake=not args.skip_bake)
-    print(f"Exported {len(layout['gear'])} gear + studio to {args.output}", flush=True)
+    print(f"Exported studio ({len(layout['gear'])} gear placed) to {args.output}", flush=True)
 
 
 if __name__ == "__main__":
