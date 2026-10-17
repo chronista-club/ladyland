@@ -17,24 +17,63 @@ func isDenyListed(_ name: String) -> Bool {
 
 /// カタログ上の 1 エントリ
 struct InstrumentComponent: Identifiable, Hashable {
-    let component: AVAudioUnitComponent
+    let name: String
+    let manufacturer: String
+    let description: AudioComponentDescription
 
-    var id: String { "\(component.manufacturerName)/\(component.name)" }
-    var name: String { component.name }
-    var manufacturer: String { component.manufacturerName }
-    var description: AudioComponentDescription { component.audioComponentDescription }
+    var id: String { "\(manufacturer)/\(name)" }
+
+    init(name: String, manufacturer: String, description: AudioComponentDescription) {
+        self.name = name
+        self.manufacturer = manufacturer
+        self.description = description
+    }
+
+    init(component: AVAudioUnitComponent) {
+        self.init(
+            name: component.name, manufacturer: component.manufacturerName,
+            description: component.audioComponentDescription)
+    }
+
+    /// 同じ楽器か（種類・サブタイプ・メーカーの 4 文字コードで見る）
+    func isSame(as other: InstrumentComponent) -> Bool {
+        description.componentType == other.description.componentType
+            && description.componentSubType == other.description.componentSubType
+            && description.componentManufacturer == other.description.componentManufacturer
+    }
+
+    static func == (a: InstrumentComponent, b: InstrumentComponent) -> Bool {
+        a.id == b.id && a.isSame(as: b)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(description.componentSubType)
+        hasher.combine(description.componentManufacturer)
+    }
 }
 
 enum PluginCatalog {
     /// システムの AU インストゥルメントを列挙する（deny list 適用済み）
-    static func instruments() -> [InstrumentComponent] {
+    ///
+    /// `builtIns` = プロセス内登録の自作楽器。**`registerSubclass` は一覧へ非同期に届く**
+    /// （更新はメインキューで処理されるので、メインスレッドで同期的に待っても現れない。
+    /// 2026-10-17 実測: 登録した直後に引くと 30 回中 29 回は無い）。記述も名前も分かって
+    /// いるので、一覧の到着を待たずに足す。読み込みは記述で行うので一覧に無くても載る
+    static func instruments(builtIns: [InstrumentComponent] = []) -> [InstrumentComponent] {
         var description = AudioComponentDescription()
         description.componentType = kAudioUnitType_MusicDevice
 
-        return AVAudioUnitComponentManager.shared()
+        let listed = AVAudioUnitComponentManager.shared()
             .components(matching: description)
             .filter { !isDenyListed($0.name) }
-            .map(InstrumentComponent.init)
-            .sorted { ($0.manufacturer, $0.name) < ($1.manufacturer, $1.name) }
+            .map(InstrumentComponent.init(component:))
+        return merge(listed, builtIns: builtIns)
+    }
+
+    /// 一覧に無い自作楽器だけ足して、メーカー → 名前の順に並べる
+    static func merge(_ listed: [InstrumentComponent], builtIns: [InstrumentComponent]) -> [InstrumentComponent] {
+        let missing = builtIns.filter { builtIn in !listed.contains { $0.isSame(as: builtIn) } }
+        return (listed + missing).sorted { ($0.manufacturer, $0.name) < ($1.manufacturer, $1.name) }
     }
 }
