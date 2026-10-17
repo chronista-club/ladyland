@@ -44,8 +44,8 @@ midir = "0.10"
 midi-msg = "0.6"
 
 # Video
-video-rs = "0.9"
-ndarray = "0.15"
+video-rs = { version = "0.12", features = ["ndarray"] }
+ndarray = "0.17"
 
 # Plugin Hosting
 rack = "0.4"
