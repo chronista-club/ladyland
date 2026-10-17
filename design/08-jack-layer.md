@@ -41,6 +41,15 @@ engine 層  64 スロット / drums / master
 ## 4. 段階
 
 1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1j. **機材の模型は midistage が正本(2026-10-14、mako「midistage に集めるか。3D モデルも。」→「C で」)**:
+    機材の形・実寸・操作子の対応は機材の事実なので、`Gear/<id>.json` / `gear_build.py` /
+    `nanokontrol.py` / `assets/blender/gear/<id>.blend` を midistage の `gear/<id>/`
+    (`gear.json` = 意味の層、`<id>.blend` = 見た目の層。midistage docs/design/04)へ移し、ここから削除した。
+    アプリは `~/Library/Application Support/midistage/gear/` の `<id>.usdz` / `<id>.json` を優先して読み
+    (`GearAssets`、無ければ従来の置き場)、studio.blend は同じ置き場の `<id>.blend` をリンクする。
+    `studio_export.py` は机・棚・環境光・配置だけを書く。機材 ID は inventory に揃え `fgdp50` → `fgdp`、
+    `ncxse` → `numa`(配置の旧 ID は `GearAssets.lookup` が読み替える)。以下 1e〜1i の
+    `Gear/<id>.json`・`gear_build.py`・`assets/blender/gear/` は当時の置き場
 1i. **編集した studio をアプリへ(2026-10-07)**: `assets/blender/scenes/studio.blend` を
     配置の正本にする。`Gear/studio_export.py` が静的家具 `desk.usdz`、機材ごとの USDZ、
     環境光、配置 JSON を書く。編集済みメッシュを再生成・上書きしない。

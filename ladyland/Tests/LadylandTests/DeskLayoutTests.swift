@@ -2,7 +2,7 @@
 //!
 //! 守りたい不変条件:
 //!   - 並び（`Gear/desk_layout.json`）は 8 台を重ならずに机の上へ置く
-//!   - Blender が書き出す配置データ（JSON）から部品とセクションを読める
+//!   - midistage の配置データ（JSON。正本は midistage gear/<id>/gear.json）から部品とセクションを読める
 //!   - Track ノブは 8 本以上のノブ列ならどの機材にも載る。LPD8 のノブ列に
 //!     載せた / 外したときだけ、LPD8 のノブの刺し先も切り替わる
 
@@ -18,13 +18,18 @@ private let repoGear = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appendingPathComponent("Gear")
 
+/// 機材の配置データの正本は midistage（docs/design/04）。配布物が入っているマシンでだけ読む
+private let midistageGear = GearAssets.midistageDirectory
+private let hasMidistageGear = FileManager.default.fileExists(
+    atPath: midistageGear.appendingPathComponent("manifest.json").path)
+
 @Suite("3D の机 — 並び")
 struct DeskLayoutModelTests {
     let layout = try! DeskLayout.decode(Data(contentsOf: repoGear.appendingPathComponent("desk_layout.json")))
 
     @Test("8 台が並ぶ")
     func gears() {
-        #expect(Set(layout.gear.map(\.id)) == ["roto", "nanokontrol", "lpd8", "minilab", "fgdp50", "keystage", "ncxse", "xtouch"])
+        #expect(Set(layout.gear.map(\.id)) == ["roto", "nanokontrol", "lpd8", "minilab", "fgdp", "keystage", "numa", "xtouch"])
     }
 
     @Test("どの 2 台も重ならず、全部机の上")
@@ -194,9 +199,9 @@ struct GearBlueprintJSONTests {
         #expect(b.sections.first { $0.id == "x.pads" }?.kind == .pads)
     }
 
-    @Test("X-TOUCH は 8 チャンネルと独立したマスターフェーダーを持つ")
+    @Test("X-TOUCH は 8 チャンネルと独立したマスターフェーダーを持つ", .enabled(if: hasMidistageGear))
     func xtouch() throws {
-        let b = try GearBlueprint.decode(Data(contentsOf: repoGear.appendingPathComponent("xtouch.json")))
+        let b = try GearBlueprint.decode(Data(contentsOf: midistageGear.appendingPathComponent("xtouch.json")))
         #expect(b.size == SIMD3<Float>(452, 100, 301))
         #expect(b.parts.filter { $0.kind == .fader }.count == 9)
         #expect(b.parts.filter { $0.kind == .fader }.allSatisfy { $0.travel == 100 })
@@ -205,10 +210,10 @@ struct GearBlueprintJSONTests {
         #expect(b.sections.allSatisfy { $0.ccs.isEmpty }, "MCU の制御を汎用 CC として捏造しない")
     }
 
-    @Test("repo の配置データは全部読める")
-    func repoFiles() throws {
-        for id in ["lpd8", "keystage", "roto", "fgdp50", "ncxse", "minilab", "xtouch"] {
-            let b = try GearBlueprint.decode(Data(contentsOf: repoGear.appendingPathComponent("\(id).json")))
+    @Test("midistage の配置データは全部読める", .enabled(if: hasMidistageGear))
+    func midistageFiles() throws {
+        for id in ["lpd8", "keystage", "roto", "fgdp", "numa", "minilab", "xtouch", "nanokontrol"] {
+            let b = try GearBlueprint.decode(Data(contentsOf: midistageGear.appendingPathComponent("\(id).json")))
             #expect(b.id == id)
             #expect(!b.sections.isEmpty)
         }

@@ -308,7 +308,7 @@ final class Desk3DScene {
         camera.components.set(lens)
     }
 
-    /// Blender から来る資産の置き場（`Gear/*.py` が書く）
+    /// 机・棚・環境光の置き場（`Gear/studio_export.py` が書く。機材は `GearAssets`）
     nonisolated static let gearDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/ladyland/gear")
 

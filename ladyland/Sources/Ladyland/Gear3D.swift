@@ -293,7 +293,7 @@ enum SurfaceMapping {
 }
 
 
-// MARK: - Blender の配置データ（`Gear/<id>.json`）
+// MARK: - 配置データ（正本は midistage `gear/<id>/gear.json`。配布物の `<id>.json` を読む）
 
 extension GearBlueprint {
     private struct JSONPart: Decodable {
@@ -318,7 +318,7 @@ extension GearBlueprint {
         let sections: [JSONSection]
     }
 
-    /// `gear_build.py` が書き出す配置データ（鍵盤は展開済み）を読む。
+    /// midistage の `gear/build.py` が書き出す配置データ（鍵盤は展開済み）を読む。
     /// JSON は W × D × H / 部品は w × d × h — 内部は x × y(高さ) × z に並べ替える
     static func decode(_ data: Data) throws -> GearBlueprint {
         let spec = try JSONDecoder().decode(JSONSpec.self, from: data)
