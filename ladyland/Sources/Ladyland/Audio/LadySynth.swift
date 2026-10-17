@@ -356,16 +356,22 @@ final class LadySynth: AUAudioUnit, @unchecked Sendable {
     /// **プロセス内に登録する**（起動時に一度）。
     /// これで `AVAudioUnitComponentManager` の列挙に出て、
     /// 既存のカタログからそのまま選べるようになる
+    /// プロセス内登録の記述（カタログに現れたかを待つときにも使う）
+    static var registeredDescription: AudioComponentDescription {
+        AudioComponentDescription(
+            componentType: kAudioUnitType_MusicDevice, componentSubType: componentSubType,
+            componentManufacturer: componentManufacturer, componentFlags: 0, componentFlagsMask: 0)
+    }
+
+    /// カタログの項（一覧への到着を待たずに足すため。メーカー名は一覧と同じく空）
+    static var catalogEntry: InstrumentComponent {
+        InstrumentComponent(name: displayName, manufacturer: "", description: registeredDescription)
+    }
+
     static func register() {
-        var description = AudioComponentDescription()
-        description.componentType = kAudioUnitType_MusicDevice
-        description.componentSubType = componentSubType
-        description.componentManufacturer = componentManufacturer
-        description.componentFlags = 0
-        description.componentFlagsMask = 0
         AUAudioUnit.registerSubclass(
             LadySynth.self,
-            as: description,
+            as: registeredDescription,
             name: displayName,
             version: 1)
     }

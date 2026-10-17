@@ -264,7 +264,9 @@ async fn main() -> Result<()> {
 
     let addr = std::env::var("FIELDD_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     info!("fieldd: field \"ladyland\" 常駐、{addr} で待ち受け");
-    server.listen(&addr).await?;
+    // club-unison 2.0: listen 系は ServerListener builder に統合された。
+    // ここで待つ（常駐プロセスの本体）ので spawn ではなく run
+    Arc::new(server).listener(&addr).run().await?;
     Ok(())
 }
 
