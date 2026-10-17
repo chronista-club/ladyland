@@ -1015,15 +1015,21 @@ final class LadySampler: AUAudioUnit, @unchecked Sendable {
 
     // MARK: - 登録
 
+    /// プロセス内登録の記述（カタログに現れたかを待つときにも使う）
+    static var registeredDescription: AudioComponentDescription {
+        AudioComponentDescription(
+            componentType: kAudioUnitType_MusicDevice, componentSubType: componentSubType,
+            componentManufacturer: componentManufacturer, componentFlags: 0, componentFlagsMask: 0)
+    }
+
+    /// カタログの項（一覧への到着を待たずに足すため。メーカー名は一覧と同じく空）
+    static var catalogEntry: InstrumentComponent {
+        InstrumentComponent(name: displayName, manufacturer: "", description: registeredDescription)
+    }
+
     static func register() {
-        var description = AudioComponentDescription()
-        description.componentType = kAudioUnitType_MusicDevice
-        description.componentSubType = componentSubType
-        description.componentManufacturer = componentManufacturer
-        description.componentFlags = 0
-        description.componentFlagsMask = 0
         AUAudioUnit.registerSubclass(
-            LadySampler.self, as: description, name: displayName, version: 1)
+            LadySampler.self, as: registeredDescription, name: displayName, version: 1)
     }
 }
 

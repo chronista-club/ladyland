@@ -522,7 +522,8 @@ final class InstrumentRack: ObservableObject {
         // カタログを組む前にやること — 後だと列挙に間に合わない
         LadySynth.register()
         LadySampler.register()
-        catalog = PluginCatalog.instruments()
+        // 登録は一覧へ非同期に届くので、2 つは記述から直接足す（PluginCatalog.instruments）
+        catalog = PluginCatalog.instruments(builtIns: [LadySynth.catalogEntry, LadySampler.catalogEntry])
         for slot in slots + [drumSlot] {
             slot.onSoloChanged = { [weak self] in self?.refreshSolos() }
         }
