@@ -64,7 +64,7 @@ struct MIDIUseSettingsView: View {
     private func status(_ device: DeviceView) -> String {
         if let error = device.error { return "接続エラー: \(error)" }
         if device.phase == "releasing" { return "切り替え中…" }
-        if device.configuring == true || (device.profileID == "roto" && session.rotoSelecting) { return "設定を反映中…" }
+        if device.configuring == true || (device.profileID == "roto" && session.rotoConfiguring) { return "設定を反映中…" }
         if let error = device.configError { return "設定エラー: \(error)" }
         if !device.present {
             if ["roto", "lpd8", "nanokontrol"].contains(device.profileID), device.assignment.clientID == "ladyland" {

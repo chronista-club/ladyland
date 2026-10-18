@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
     private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
     let midiUse = MIDIUseSession()
+    lazy var rotoSetupSync = RotoSetupSync(session: midiUse)
     lazy var xtouch = XTouchController(rack: rack, onSelect: { [weak self] in self?.select($0) },
         onChange: { [weak self] in self?.scheduleAutosave() })
     lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
@@ -226,6 +227,7 @@ final class AppState: ObservableObject {
             guard rotoColors != oldValue else { return }
             roto.colors = rotoColors
             scheduleAutosave()  // [常時保存 22] ROTO の配色
+            scheduleRotoLiveBurn()
         }
     }
 
@@ -383,8 +385,8 @@ final class AppState: ObservableObject {
 
     // MARK: - ROTO の冊焼き（UI ボタンと外部トリガーの共通入口）
 
-    /// ROTO 3 冊焼きの結果（設定画面の表示用。外部トリガー経由でも更新される）
-    @Published var rotoBurnResult: String?
+    /// サービスが確認した冊書き込みの結果（ボタン・自動追従・通知で共通）。
+    var rotoBurnResult: String? { rotoSetupSync.message }
 
     /// notify_register_dispatch の登録 token（保持しないと解除できない）
     private var agentTriggerTokens: [Int32] = []
@@ -445,21 +447,34 @@ final class AppState: ObservableObject {
         return labels
     }
 
-    /// ApplyDeviceSetup の本体提供までは直接 Serial へフォールバックしない。
-    /// 旧 Darwin 通知の入口も、書き込み済みと誤認させず明示的に止める。
-    func burnRotoSetups() {
-        let message = "ROTO の書き込みは準備中です。JSON 書き出しをご利用ください。"
-        rotoBurnResult = message
-        NSLog("roto: %@", message)
+    private func rotoSetupPayloads() throws -> [RotoSetupPayload] {
+        try RotoMidiSetupExport.books(
+            slotNames: rotoMixerSlotNames(), slotColors: rotoMixerSlotColors(),
+            seatLabels: rotoSeatLabels(), seatColor: rack.selectedSlot.rotoColor,
+            seatCellColors: rotoSeatCellColors(), assignedSeatsOnly: true,
+            selectedTrack: rack.selected + 1, selectButtonColor: rotoColors.selectButton
+        ).map(RotoMidiSetupExport.servicePayload)
     }
 
-    /// 旧外部トリガーは残すが、Apply 対応までは書き込み不可を明示する。
+    /// ボタンと旧 Darwin 通知の共通入口。4 冊ともサービスで読み戻し・差分適用する。
+    func burnRotoSetups() {
+        do { rotoSetupSync.submit(try rotoSetupPayloads(), force: true) }
+        catch { rotoSetupSync.reject(error) }
+    }
+
+    /// 希望値を渡すだけ。デバウンス・排他・完了待ちはサービスへの窓口に集約する。
+    func scheduleRotoLiveBurn() {
+        do { rotoSetupSync.submit(try rotoSetupPayloads()) }
+        catch { rotoSetupSync.reject(error) }
+    }
+
+    /// 外部トリガーも UI と同じ Apply 経路を使う。
     private func installAgentTriggers() {
         var token: Int32 = 0
         notify_register_dispatch(
             "club.chronista.ladyland.roto.burn", &token, DispatchQueue.main
         ) { [weak self] _ in
-            NSLog("roto: 外部トリガー受信 — 書き込み準備中")
+            NSLog("roto: 外部トリガー受信 — 冊をサービス経由で焼く")
             self?.burnRotoSetups()
         }
         agentTriggerTokens.append(token)
@@ -610,6 +625,9 @@ final class AppState: ObservableObject {
 
     private func bindMIDIUseSession() {
         let access = midiUse.access
+        rotoSetupSync.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         roto.onSelectSetup = { [weak self] setup in
             guard let self else { throw MIDIUseError.unavailable }
             try await self.midiUse.selectRotoSetup(setup)
@@ -640,7 +658,9 @@ final class AppState: ObservableObject {
             guard let self else { return }
             switch device.profileID {
             case "lpd8": self.ledBus.setDeviceAvailable(true)
-            case "roto": self.roto.acquireDevice()
+            case "roto":
+                self.roto.acquireDevice()
+                self.scheduleRotoLiveBurn()
             case "keystage": self.keystage.acquireDevice()
             case "xtouch":
                 guard let lease = device.lease?.token else { return }
@@ -653,6 +673,7 @@ final class AppState: ObservableObject {
         }
         midiUse.onSnapshot = { [weak self] snapshot in
             guard let self else { return }
+            self.rotoSetupSync.refresh()
             self.midi?.updateDevices(snapshot)
             self.midiConnectedSources = self.midi?.connectedSources ?? []
             self.midiConnected = self.midi?.connected ?? []
@@ -1262,6 +1283,7 @@ final class AppState: ObservableObject {
     func setTrackColor(_ slot: InstrumentSlot, to color: UInt8?) {
         slot.rotoColor = color
         scheduleAutosave()  // [常時保存 26] トラックカラー
+        scheduleRotoLiveBurn()
     }
 
     /// トラック名を設定する（Track 面。空・空白だけは nil = プラグイン名へ戻す）
@@ -1269,6 +1291,7 @@ final class AppState: ObservableObject {
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         slot.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed
         scheduleAutosave()  // [常時保存 27] トラック名
+        scheduleRotoLiveBurn()
     }
 
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
@@ -1814,6 +1837,7 @@ final class AppState: ObservableObject {
 
         // ROTO の面も塗り直す（選択・ロード・割当の変更はすべてここを通る）
         roto.refresh()
+        scheduleRotoLiveBurn()
         // Keystage のノブ OLED も同じ内容で（mako 依頼 2026-08-09）
         refreshKeystageDisplay()
 

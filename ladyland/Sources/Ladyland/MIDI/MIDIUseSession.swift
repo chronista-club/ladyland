@@ -11,6 +11,12 @@ final class MIDIUseSession: ObservableObject {
     @Published private(set) var connectionError: String?
     @Published private(set) var rotoSetupError: String?
     @Published private(set) var rotoSelecting = false
+    @Published private(set) var rotoApplying = false
+    var rotoConfiguring: Bool { rotoSelecting || rotoApplying }
+    var hasRotoLease: Bool {
+        guard connected, task?.isCancelled != true, let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }) else { return false }
+        return Self.rotoSetups.allSatisfy { device.setupOwners?["ladyland"]?.contains($0) == true }
+    }
     var onReleased: ((DeviceView) async -> Void)?
     var onAcquired: ((DeviceView) -> Void)?
     var onSnapshot: ((MidistageClient.Snapshot) -> Void)?
@@ -43,10 +49,80 @@ final class MIDIUseSession: ObservableObject {
         _ = try await client.setEnabled(deviceID: device.deviceID, enabled: enabled,
                                        expectedRevision: device.assignment.revision, takeover: takeover)
     }
+    /// Apply は冊の中身だけを変える。currentSetup との一致を完了条件にしない。
+    static func configurationFinished(_ current: MidistageClient.Snapshot,
+                                      accepted: MidistageClient.Snapshot, token: String) throws -> Bool {
+        guard current.serverEpoch == accepted.serverEpoch, current.sessionID == accepted.sessionID,
+              let roto = current.devices.first(where: { $0.deviceID == "roto" }),
+              current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
+        guard current.sequence > accepted.sequence, roto.configuring == false else { return false }
+        if let error = roto.configError { throw MIDIUseError.rotoConfigurationFailed(error) }
+        return true
+    }
+
+    /// 4 冊のうち希望値が変わった冊を順に渡す。送信中は Select と排他にする。
+    func applyRotoSetups(_ payloads: [RotoSetupPayload]) async throws {
+        guard let client, connected, let first = snapshot,
+              let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }),
+              !rotoConfiguring, !payloads.isEmpty,
+              Set(payloads.map(\.setup)).count == payloads.count,
+              payloads.allSatisfy({ Self.rotoSetups.contains($0.setup)
+                  && device.setupOwners?["ladyland"]?.contains($0.setup) == true }),
+              let token = device.lease?.token else { throw MIDIUseError.rotoUnavailable }
+        rotoApplying = true
+        rotoSetupError = nil
+        rotoErrorLease = nil
+        defer { rotoApplying = false }
+        access.revoke(profileID: "roto")
+        await release(device.deviceID)
+        func currentRoto() throws -> DeviceView {
+            try Task.checkCancellation()
+            guard self.client === client, connected, task?.isCancelled != true, let current = snapshot,
+                  current.serverEpoch == first.serverEpoch, current.sessionID == first.sessionID,
+                  let roto = current.devices.first(where: { $0.deviceID == "roto" }),
+                  current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
+            return roto
+        }
+        do {
+            for payload in payloads {
+                let deadline = ContinuousClock.now + .seconds(30)
+                // 接続直後の自動 Select や、すでに受理された設定の完了を待つ。
+                while try currentRoto().configuring != false {
+                    guard ContinuousClock.now < deadline else {
+                        throw MIDIUseError.rotoConfigurationFailed("ROTO の設定待ちが時間内に完了しませんでした。")
+                    }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                let accepted = try await client.applyDeviceSetup(deviceID: "roto", leaseToken: token,
+                                                                  setup: payload.setup, content: payload.content)
+                guard accepted.devices.first(where: { $0.deviceID == "roto" })?.configuring == true else {
+                    throw MIDIUseError.rotoConfigurationFailed("サービスが書き込み受付を確認できませんでした。")
+                }
+                while true {
+                    _ = try currentRoto()
+                    if let current = snapshot,
+                       try Self.configurationFinished(current, accepted: accepted, token: token) { break }
+                    guard ContinuousClock.now < deadline else {
+                        throw MIDIUseError.rotoConfigurationFailed("ROTO の書き込みが時間内に完了しませんでした。")
+                    }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+            }
+            rotoSetupError = nil
+        } catch {
+            if self.client === client,
+               let latest = devices.first(where: { $0.deviceID == "roto" }),
+               owns(latest), latest.lease?.token == token {
+                rotoSetupError = error.localizedDescription
+                rotoErrorLease = token
+            }
+            throw error
+        }
+    }
     func selectRotoSetup(_ setup: Int) async throws {
         guard let client, connected,
               let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }),
-              !rotoSelecting, device.configuring != true, Self.rotoSetups.contains(setup),
+              !rotoConfiguring, device.configuring != true, Self.rotoSetups.contains(setup),
               device.setupOwners?["ladyland"]?.contains(setup) == true,
               let token = device.lease?.token else { throw MIDIUseError.rotoUnavailable }
         rotoSelecting = true
@@ -59,7 +135,7 @@ final class MIDIUseSession: ObservableObject {
         await release(device.deviceID)
         do {
             try Task.checkCancellation()
-            guard self.client === client,
+            guard self.client === client, connected, task?.isCancelled != true,
                   let latest = devices.first(where: { $0.deviceID == device.deviceID }),
                   owns(latest), latest.lease?.token == token
             else { throw MIDIUseError.rotoUnavailable }
@@ -70,7 +146,7 @@ final class MIDIUseSession: ObservableObject {
             let deadline = ContinuousClock.now + .seconds(30)
             while true {
                 try Task.checkCancellation()
-                guard self.client === client, connected, let current = snapshot,
+                guard self.client === client, connected, task?.isCancelled != true, let current = snapshot,
                       current.serverEpoch == accepted.serverEpoch, current.sessionID == accepted.sessionID,
                       let roto = current.devices.first(where: { $0.deviceID == device.deviceID }),
                       current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
@@ -133,7 +209,7 @@ final class MIDIUseSession: ObservableObject {
             && incoming.devices.first(where: { $0.deviceID == "roto" })?.lease?.token != rotoErrorLease
         usable.devices = incoming.devices.filter { device in
             guard device.profileID == "roto" else { return true }
-            return !rotoSelecting && (rotoSetupError == nil || staleSelectionError)
+            return !rotoConfiguring && (rotoSetupError == nil || staleSelectionError)
                 && device.configuring == false && device.configError == nil
                 && device.currentSetup.map { Self.rotoSetups.contains($0)
                     && device.setupOwners?["ladyland"]?.contains($0) == true } == true
@@ -148,18 +224,18 @@ final class MIDIUseSession: ObservableObject {
                 await release(id)
             }
         }
-        // SelectSetup が開始した release も含め、同じ drain を待つ。
+        // Select / Apply が開始した release も含め、同じ drain を待つ。
         // owned から除去済みでも、完了前に quiesced / 再取得へ進まない。
         await drainReleases()
         for device in usable.devices where usable.owns(device) && owned[device.deviceID] == nil {
-            // 別機材の release を await している間に SelectSetup が始まった場合も守る。
-            if device.profileID == "roto" && rotoSelecting { continue }
+            // 別機材の release を await している間に設定要求が始まった場合も守る。
+            if device.profileID == "roto" && rotoConfiguring { continue }
             owned[device.deviceID] = device
             onAcquired?(device)
         }
         onSnapshot?(incoming)
     }
-    static let rotoSetups = [0, 1, 2, 3]
+    nonisolated static let rotoSetups = [0, 1, 2, 3]
     private func release(_ id: String) async {
         if let pending = releases[id] { await pending.value; return }
         guard let previous = owned.removeValue(forKey: id) else { return }

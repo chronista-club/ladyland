@@ -1,11 +1,12 @@
 //! ROTO MIDI モードの冊構成（2026-08-11 起工、08-12 にミキサー冊 + 直接焼き）。
 //!
 //! ROTO の本線は MIDI モード。**1 setup = 4 ページ × 8 ノブ = 32 席**で、
-//! ← → 矢印がページ送り。冊の配置（mako 裁定 2026-08-12「MIXER は SETUP 01 で」）:
+//! ← → 矢印がページ送り。冊の配置（内部 index 0–3、画面 SETUP 01–04）:
 //!
-//!   SETUP 01 "LL MIXER"  = スロット 1-32 の gain（CC = スロット番号、**ch2**）
-//!   SETUP 02 "LL P1-P4"  = 64 席正典の前半（CC0-31、ch1）
-//!   SETUP 03 "LL P5-P8"  = 後半（CC32-63、ch1）
+//!   SETUP 01 "MIXER-" = スロット 1–32 の gain（CC0–31、ch2）
+//!   SETUP 02 "MIXER+" = スロット 33–64 の gain（CC32–63、ch2）
+//!   SETUP 03 "INST-"  = 64 席正典の前半（CC0–31、ch1）
+//!   SETUP 04 "INST+"  = 後半（CC32–63、ch1）。INST 冊名は選択楽器名を反映する
 //!
 //! **チャンネル = 意味論の名前空間**: ch1 = 選択スロットの席（KnobPages 正典、
 //! Keystage と同じ CC 地図）、ch2 = ミキサー（受信は RotoService.handleShort の
@@ -14,12 +15,12 @@
 //! オミット — 冊の移動は実機の SEL で。
 //!
 //! 実機への入れ方は 2 経路（同じビルダから生成 — 第 2 の定義を作らない）:
-//! 1. **サービスへの書き込み**: midistage の ApplyDeviceSetup 本体待ち。
+//! 1. **サービスへの書き込み**: midistage の ApplyDeviceSetup へ渡す。
 //!    book を冊単位で渡す。Serial の開閉と席単位の差分は midistaged の責務
 //! 2. **Export All 互換 JSON**: ROTO-SETUP の File > Import 用（控え）
 //!
 //! ミキサー冊の席名は**焼いた時点のスロット名のスナップショット**。
-//! 楽器を入れ替えたら焼き直せば追従する（ライブラベルの先取り）
+//! 楽器名や色の変更は AppState からサービスへの自動反映を予約する。
 
 import Foundation
 import RotoKit
@@ -92,7 +93,7 @@ enum RotoMidiSetupExport {
         let buttons: [RotoMidiSetup.Button]
     }
 
-    /// 全冊。INST ×2 が先頭、MIXER ×2 が SETUP 05/06。
+    /// 全冊。MIXER ×2 → INST ×2（内部 setup 0–3）。
     /// - Parameters:
     ///   - slotNames: スロット 1-64 の表示名（焼き時点のスナップショット）
     ///   - slotColors: スロットのトラックカラー（nil = バンク色 36-39 の既定）
@@ -103,7 +104,7 @@ enum RotoMidiSetupExport {
     ///   - seatCellColors: 席単位の色上書き（CC → 色。trackCells — 「Cutoff は
     ///     赤」の役割色）。優先順は **席色 > トラックカラー > ページ色**
     ///   - assignedSeatsOnly: true = INST 冊は**割当のある席だけ**
-    ///     （直接焼き用 — 残り席は allRequests が clear で埋める。
+    ///     （サービスは未掲載の席を CLEAR する。
     ///     mako 指摘 2026-08-12「L02 INST はゴミが多い」）。
     ///     false = 全席を正典ラベルで（JSON 控えの基準形）
     ///   - selectedTrack: 選択トラック番号（1 始まり）。INST 冊の冊名に
@@ -254,17 +255,17 @@ enum RotoMidiSetupExport {
 
     // MARK: - 旧 admin 形式の生成器（製品からの送信なし）
 
-    /// 冊 × 種別 × 席。Codable は旧 RotoDiffShadow の保存形式との互換用。
-    struct SeatKey: Hashable, Codable {
+    /// 旧形式の回帰検証に使う、冊 × 種別 × 席のキー。
+    struct SeatKey: Hashable {
         let setup: Int
         let kind: Kind
         let control: Int
 
-        enum Kind: String, Hashable, Codable { case name, knob, button }
+        enum Kind: String, Hashable { case name, knob, button }
     }
 
     /// 自分の冊の旧形式リクエストを列挙する。生成器の回帰検証に残し、
-    /// 製品からは送信しない。次段の冊全体 payload も同じ builder を使う。
+    /// 製品からは送信しない。冊全体の servicePayload も同じ builder を使う。
     ///
     /// **全席 = set XOR clear**(mako 指摘 2026-08-12「L02 INST はゴミが多い。
     /// まっさらから作り直したほうがいい」): 4 冊 × ノブ 32 + ボタン 32 の全席が

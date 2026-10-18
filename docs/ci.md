@@ -28,7 +28,7 @@ unit / transport 回帰を実行し、その後 `scripts/test-matrix.sh` のフ�
 ## ROTO の隔離結合テスト
 
 `scripts/test-roto-midistage.sh` は SwiftPM resolve 後の midistage checkout が
-`ladyland/Package.resolved` の revision（現在 `0379302`）と一致し、変更がないことを確認する。
+`ladyland/Package.resolved` の revision（現在 `fc9360e`）と一致し、変更がないことを確認する。
 そのソースと同じ `Cargo.lock` から `protocol_fixture` を `--locked` でビルドし、
 `MIDISTAGE_TEST_SERVER` を設定して Swift テストを実行する。lane の手元バイナリのパスは使わない。
 ビルド・revision 確認・テストのどれかが失敗したら CI step も失敗する。

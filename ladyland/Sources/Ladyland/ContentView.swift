@@ -551,13 +551,16 @@ struct ContentView: View {
         Group {
             if device?.present != true {
                 Text("ROTO: 未接続").foregroundColor(theme.textTertiary)
-            } else if device?.configuring == true || appState.midiUse.rotoSelecting {
+            } else if device?.configuring == true || appState.midiUse.rotoConfiguring {
                 Text("ROTO: 設定中…").foregroundColor(theme.textSecondary)
             } else if device?.configError != nil || appState.midiUse.rotoSetupError != nil {
                 Text("ROTO: 設定エラー").foregroundColor(theme.semanticWarningText)
                     .help("設定の MIDI 機材で詳細を確認できます")
+            } else if case .failed = appState.rotoSetupSync.status {
+                Text("ROTO: 書き込みエラー").foregroundColor(theme.semanticWarningText)
+                    .help(appState.rotoSetupSync.message ?? "")
             } else {
-                Text("ROTO: 書き込み準備中").foregroundColor(theme.textTertiary)
+                Text("ROTO: \(appState.rotoSetupSync.message ?? "待機中")").foregroundColor(theme.textTertiary)
             }
         }
         .font(LadylandFont.caption)

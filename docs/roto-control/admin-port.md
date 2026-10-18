@@ -11,15 +11,20 @@
 **切替え・読み書きは midistage 経由**に集約する。Serial/admin port を開くのは midistaged だけで、
 Ladyland 本体は開かない。以下のバイト仕様と旧ベンチはプロトコルの調査記録として残す。
 
-- 配置順序は **常駐 midistaged を `0379302` 以降へ更新・再起動 → Ladyland を更新・再起動**。
+- 配置順序は **常駐 midistaged を Apply 実装を含む版（SDK 固定版 `fc9360e`）へ更新・再起動 → Ladyland を更新・再起動**。
   旧 daemon は `setup_owners` / 登録 API が無いため ROTO を使えない。更新・再起動は lead が担当する。
 - 台帳は midistage の `settings.json`。Ladyland は起動・再接続時に `SetDeviceSetups` で席 0–3 を登録する。
   席 4・5 の旧配置掃除は廃止する。VP の席 8（ROTO 画面の SETUP 09）にも触れない。
   内部の setup 番号は 0 始まり、ROTO 画面の SETUP 番号は 1 始まりで、表示は内部番号 + 1 となる。
 - 長押しで INST 冊へ移るときは `SelectSetup(device_id, lease_token, setup: 2)` を使う。
 - `configuring` 中は入力・モーター送信を止める。成功後に同期し直し、`config_error` は設定画面へ出す。
-- 固定 SDK `0379302` は `ApplyDeviceSetup` の契約までで、本体は未実装。この段では全焼き・自動差分焼きを停止し、
-  JSON export を残す。旧いローカルの影を同期済みとは表示しない。次段の書き込みは冊単位でサービスへ渡す。
+- 全冊ボタン・名前や色の自動追従は `ApplyDeviceSetup` に冊全体を渡す。対象は 0–3 のみ。
+  送信可能になった最初の変更から 1 秒で最新値を送り、継続変更でも期限を延ばさない。同じ lease 内の同一要求を抑止する。実機との差分・読み戻し・バックアップはサービスが担当する。
+  JSON export は控えとして残し、旧ローカルの影は使わない。
+- Apply は現在表示中の setup を切り替えない。受付後の新しい同一 lease の snapshot で `configuring=false` とエラーなしを確認する。
+  失敗は画面に出し、ポーリングで再試行を繰り返さない。全冊ボタンで再試行できる。
+- payload の名前は印字可能な ASCII 12 字（非対応文字は `?`、超過分は切る）、色は 0–82、チャンネルは 1–16。
+  CC7 / 値 0–127 / 滑らかなノブ（インデントなし）と PUSH / TOGGLE を保つ。未掲載席は CLEAR する。
 - 読み出しの入口は midistage の `roto-dump`。この CLI も Serial を使うため、実行は lead がサービスとの排他を確認してから行う。
   Ladyland から旧 `RigBench roto-admin` を自動実行しない。
 

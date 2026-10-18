@@ -96,8 +96,8 @@ import MidistageClient
     } catch { await session.stop(); await vp.close(); throw error }
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
-@MainActor func rotoSessionTakeoverWaitsForSelectionDrain() async throws {
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil), arguments: [false, true])
+@MainActor func rotoSessionTakeoverWaitsForConfigurationDrain(applying: Bool) async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
     let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
@@ -111,16 +111,17 @@ import MidistageClient
     do {
         try await waitForRotoCondition { acquired }
         _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [8])
-        let selection = Task { try await session.selectRotoSetup(2) }
+        let selection = Task {
+            if applying { try await session.applyRotoSetups([.init(setup: 2, content: .init(name: "INST-"))]) }
+            else { try await session.selectRotoSetup(2) }
+        }
         try await waitForRotoCondition { drain.started }
         let previous = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
-        _ = try await vp.setEnabled(deviceID: "roto", enabled: true,
+        let takeover = try await vp.setEnabled(deviceID: "roto", enabled: true,
                                     expectedRevision: previous.assignment.revision, takeover: true)
-        // 受信 loop が譲渡要求を観測したところまで進める。drain はまだ停止中。
-        try await waitForRotoCondition {
-            guard let roto = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
-            return roto.phase == "releasing" || roto.assignment.clientID == "vp"
-        }
+        #expect(takeover.devices.first(where: { $0.deviceID == "roto" })?.phase == "releasing")
+        // 受信 loop は直前の snapshot の apply 内ですでに同じ drain を待っている場合もある。
+        // その loop の前進を要求せず、サービス側の lease を複数 tick にわたり観測する。
         for _ in 0..<10 {
             // fixture は20ms tickでquiesced後のleaseを更新する。即時往復だけで判定しない。
             try await Task.sleep(for: .milliseconds(20))
@@ -148,8 +149,8 @@ import MidistageClient
     }
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
-@MainActor func rotoSessionStopWaitsForSelectionDrain() async throws {
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil), arguments: [false, true])
+@MainActor func rotoSessionStopWaitsForConfigurationDrain(applying: Bool) async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
     let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
@@ -165,7 +166,10 @@ import MidistageClient
     session.start()
     do {
         try await waitForRotoCondition { acquired }
-        let selection = Task { try await session.selectRotoSetup(2) }
+        let selection = Task {
+            if applying { try await session.applyRotoSetups([.init(setup: 2, content: .init(name: "INST-"))]) }
+            else { try await session.selectRotoSetup(2) }
+        }
         try await waitForRotoCondition { drain.started }
         let stopping = Task { await session.stop(); stopped = true }
         // nano の release は clear() 到達の印。ROTO は owned から外れていても drain 中。
@@ -190,7 +194,7 @@ import MidistageClient
 }
 
 @MainActor
-private final class RotoReleaseLatch {
+final class RotoReleaseLatch {
     private(set) var started = false
     private var finished = false
     private var continuation: CheckedContinuation<Void, Never>?
@@ -233,14 +237,14 @@ struct RotoServiceFixture {
 }
 
 @MainActor
-func waitForRotoCondition(_ condition: () -> Bool) async throws {
+func waitForRotoCondition(file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(10)
     while !condition() {
         guard ContinuousClock.now < deadline else {
-            throw RotoFixtureError.conditionNotReached
+            throw RotoFixtureError.conditionNotReached("\(file):\(line)")
         }
         try await Task.sleep(for: .milliseconds(20))
     }
 }
 
-enum RotoFixtureError: Error { case conditionNotReached }
+enum RotoFixtureError: Error { case conditionNotReached(String) }

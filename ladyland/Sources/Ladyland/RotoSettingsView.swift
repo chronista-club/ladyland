@@ -59,8 +59,8 @@ struct RotoSettingsView: View {
                 GroupBox("冊の焼き込み") {
                     VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
                         HStack {
-                            Text("書き込み準備中")
-                                .font(.caption).foregroundColor(Color.colorTextSecondary)
+                            Button("全冊を焼く") { appState.burnRotoSetups() }
+                                .disabled(!appState.midiUse.hasRotoLease || appState.midiUse.rotoConfiguring)
                             Button("JSON 書き出し（Import 用）") {
                                 exportMidiSetups()
                             }
@@ -86,9 +86,6 @@ struct RotoSettingsView: View {
             .padding(CreoUITokens.spacingM)
         }
     }
-
-    // 書き込みの復帰は midistage ApplyDeviceSetup の本体提供後。
-    // この段では古いローカルの影を読み戻さず、JSON 控えだけを作る。
 
     /// 書き出し先を選ばせて Export All 互換フォルダを書き、Finder で見せる。
     /// ROTO-SETUP の Import All ダイアログへそのまま渡せる状態で終わる
