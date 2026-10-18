@@ -35,11 +35,11 @@ import MidistageClient
         try await waitForRotoCondition {
             session.devices.first(where: { $0.deviceID == "roto" })?.currentSetup == 3
         }
-        await #expect(throws: MIDIUseError.self) { try await session.selectRotoSetup(6) }
+        await #expect(throws: MIDIUseError.self) { try await session.selectRotoSetup(8) }
         let (vp, _) = try await Client.connect(endpointURL: fixture.endpoint, clientID: "vp",
                                               displayName: "VP fixture", nativeMIDI: false)
         do {
-            _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [6])
+            _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [8])
             let device = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
             _ = try await vp.setEnabled(deviceID: "roto", enabled: true,
                                         expectedRevision: device.assignment.revision, takeover: true)
@@ -49,7 +49,7 @@ import MidistageClient
             } catch { /* local guard or server rejects the old lease */ }
             try await waitForRotoCondition {
                 guard let device = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
-                return device.assignment.clientID == "vp" && device.currentSetup == 6 && !session.owns(device)
+                return device.assignment.clientID == "vp" && device.currentSetup == 8 && !session.owns(device)
             }
             await #expect(throws: MIDIUseError.self) { try await session.selectRotoSetup(2) }
             #expect(session.rotoSetupError == nil)
@@ -110,7 +110,7 @@ import MidistageClient
     session.start()
     do {
         try await waitForRotoCondition { acquired }
-        _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [6])
+        _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [8])
         let selection = Task { try await session.selectRotoSetup(2) }
         try await waitForRotoCondition { drain.started }
         let previous = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
@@ -136,7 +136,7 @@ import MidistageClient
         } catch { /* the old selection must be rejected */ }
         try await waitForRotoCondition {
             guard let roto = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
-            return roto.phase == "active" && roto.currentSetup == 6 && !session.owns(roto)
+            return roto.phase == "active" && roto.currentSetup == 8 && !session.owns(roto)
         }
         await session.stop()
         await vp.close()

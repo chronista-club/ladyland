@@ -44,7 +44,7 @@ struct RotoMidistageTests {
 
     @Test func waitsUntilLadylandsRegisteredSetupIsCurrent() async throws {
         let session = MIDIUseSession()
-        for (index, setup) in [nil, 6].enumerated() {
+        for (index, setup) in [nil, 8].enumerated() {
             var pending = try rotoSnapshot(sequence: index + 1)
             pending.devices[0].currentSetup = setup
             await session.apply(pending)
@@ -99,7 +99,7 @@ func rotoSnapshot(sequence: Int, configuring: Bool = false, error: String? = nil
     var roto = device("roto", profile: "roto")
     roto["configuring"] = configuring
     roto["current_setup"] = 2
-    roto["setup_owners"] = ["ladyland": [0, 1, 2, 3], "vp": [6]]
+    roto["setup_owners"] = ["ladyland": [0, 1, 2, 3], "vp": [8]]
     roto["config_error"] = error
     return try JSONDecoder().decode(MidistageClient.Snapshot.self, from: JSONSerialization.data(withJSONObject: [
         "sequence": sequence, "protocol_version": 1, "server_epoch": "test", "session_id": "session",

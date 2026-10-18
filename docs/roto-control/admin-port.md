@@ -14,7 +14,8 @@ Ladyland 本体は開かない。以下のバイト仕様と旧ベンチはプ�
 - 配置順序は **常駐 midistaged を `0379302` 以降へ更新・再起動 → Ladyland を更新・再起動**。
   旧 daemon は `setup_owners` / 登録 API が無いため ROTO を使えない。更新・再起動は lead が担当する。
 - 台帳は midistage の `settings.json`。Ladyland は起動・再接続時に `SetDeviceSetups` で席 0–3 を登録する。
-  席 4・5 の旧配置掃除は廃止する。VP の席 6 にも触れない。
+  席 4・5 の旧配置掃除は廃止する。VP の席 8（ROTO 画面の SETUP 09）にも触れない。
+  内部の setup 番号は 0 始まり、ROTO 画面の SETUP 番号は 1 始まりで、表示は内部番号 + 1 となる。
 - 長押しで INST 冊へ移るときは `SelectSetup(device_id, lease_token, setup: 2)` を使う。
 - `configuring` 中は入力・モーター送信を止める。成功後に同期し直し、`config_error` は設定画面へ出す。
 - 固定 SDK `0379302` は `ApplyDeviceSetup` の契約までで、本体は未実装。この段では全焼き・自動差分焼きを停止し、

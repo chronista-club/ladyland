@@ -46,7 +46,8 @@ OFF・他アプリへの譲渡でも Jack の部品と束縛は保持。再起�
 
 - Serial/admin port の開閉は midistaged に集約する。Ladyland 本体からの直接 open は廃止する。
 - 接続時に `SetDeviceSetups(device_id: "roto", setups: [0, 1, 2, 3])` で自分の冊だけを登録する。
-  旧配置の掃除対象だった席 4・5 も、VP の席 6 も登録・書き込み対象にしない。
+  旧配置の掃除対象だった席 4・5 も、VP の席 8（ROTO 画面の SETUP 09）も登録・書き込み対象にしない。
+  内部の setup 番号は 0 始まり、ROTO 画面の SETUP 番号は 1 始まりで、表示は内部番号 + 1 となる。
 - MIXER ボタンの長押しは、現在の lease token を付けた `SelectSetup(setup: 2)` で INST 冊へ移動する。
   受付は書き込み完了ではない。完了・失敗は snapshot で確認する。
 - `configuring` 中と `config_error` がある間は ROTO の入力・出力を止める。
