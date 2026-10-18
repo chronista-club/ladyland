@@ -59,10 +59,16 @@ OFF・他アプリへの譲渡でも Jack の部品と束縛は保持。再起�
 ### 書き込みの移行境界
 
 SDK の固定版は midistage nightly `03793029fbc726c1b2431ea66862c46cdb398424`（PR #31）。
+配置は **常駐 midistaged をまず `0379302` 以降へ更新・再起動し、その後 Ladyland を更新・再起動する**順序にする。
+古い daemon は `setup_owners` / 登録 API が無いため ROTO を使用できない。設定画面の更新案内に従い、
+daemon 更新後は Ladyland も再接続する（登録エラーは接続単位で保持し、直接 Serial へは戻らない）。
 `ApplyDeviceSetup` の型とメソッドは存在するが、この版のサービス本体は `not_implemented` を返す。
 このため全焼き・自動差分焼きは停止し、ROTO 設定画面には「書き込み準備中」と JSON export を残す。
+この段では楽器変更によるノブ画面の名前・色の自動追従も止まる。Apply 本体の接続後に再開する。
 旧 Darwin 通知も書き込み不可を明示し、ローカルの `roto-shadow.json` は読み込まず、更新・削除もしない。
 Serial I/O の実装自体を RotoKit から調査用 RigBench へ移し、Ladyland 製品の依存から外す。
+未使用になった `RotoDiffShadow` と `SeatKey: Codable` は旧形式の回帰テストとともに残し、
+次段の冊全体 payload への移行時に削除する。現在の製品はこの保存形式を読み書きしない。
 
 次段では `RotoMidiSetupExport.books` を `SetupContent` に変換して冊単位で `ApplyDeviceSetup` へ渡す。
 席単位の差分・バックアップ・読み戻しはサービスが担当する。受付応答は `configuring=true` であることを確認し、

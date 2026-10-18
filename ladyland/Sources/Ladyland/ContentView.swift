@@ -549,7 +549,9 @@ struct ContentView: View {
     private var rotoStatusFooter: some View {
         let device = appState.midiUse.devices.first { $0.deviceID == "roto" }
         Group {
-            if device?.configuring == true || appState.midiUse.rotoSelecting {
+            if device?.present != true {
+                Text("ROTO: 未接続").foregroundColor(theme.textTertiary)
+            } else if device?.configuring == true || appState.midiUse.rotoSelecting {
                 Text("ROTO: 設定中…").foregroundColor(theme.textSecondary)
             } else if device?.configError != nil || appState.midiUse.rotoSetupError != nil {
                 Text("ROTO: 設定エラー").foregroundColor(theme.semanticWarningText)

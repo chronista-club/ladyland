@@ -122,6 +122,8 @@ import MidistageClient
             return roto.phase == "releasing" || roto.assignment.clientID == "vp"
         }
         for _ in 0..<10 {
+            // fixture は20ms tickでquiesced後のleaseを更新する。即時往復だけで判定しない。
+            try await Task.sleep(for: .milliseconds(20))
             let current = try await vp.snapshot()
             let roto = try #require(current.devices.first(where: { $0.deviceID == "roto" }))
             #expect(roto.phase == "releasing")
@@ -142,6 +144,47 @@ import MidistageClient
         drain.finish()
         await session.stop()
         await vp.close()
+        throw error
+    }
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
+@MainActor func rotoSessionStopWaitsForSelectionDrain() async throws {
+    let fixture = try await RotoServiceFixture.start()
+    defer { fixture.stop() }
+    let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
+    let drain = RotoReleaseLatch()
+    var acquired = false
+    var clearedNano = false
+    var stopped = false
+    session.onAcquired = { if $0.deviceID == "roto" { acquired = true } }
+    session.onReleased = { device in
+        if device.deviceID == "roto" { await drain.wait() }
+        if device.deviceID == "nano" { clearedNano = true }
+    }
+    session.start()
+    do {
+        try await waitForRotoCondition { acquired }
+        let selection = Task { try await session.selectRotoSetup(2) }
+        try await waitForRotoCondition { drain.started }
+        let stopping = Task { await session.stop(); stopped = true }
+        // nano の release は clear() 到達の印。ROTO は owned から外れていても drain 中。
+        try await waitForRotoCondition { clearedNano }
+        for _ in 0..<10 {
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(!stopped)
+        }
+        drain.finish()
+        await stopping.value
+        #expect(stopped)
+        #expect(!session.connected)
+        do {
+            try await selection.value
+            Issue.record("Selection succeeded after its connection was stopped")
+        } catch { /* stop invalidates the selection's connection */ }
+    } catch {
+        drain.finish()
+        await session.stop()
         throw error
     }
 }

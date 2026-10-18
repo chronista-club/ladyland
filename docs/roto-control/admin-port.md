@@ -11,6 +11,8 @@
 **切替え・読み書きは midistage 経由**に集約する。Serial/admin port を開くのは midistaged だけで、
 Ladyland 本体は開かない。以下のバイト仕様と旧ベンチはプロトコルの調査記録として残す。
 
+- 配置順序は **常駐 midistaged を `0379302` 以降へ更新・再起動 → Ladyland を更新・再起動**。
+  旧 daemon は `setup_owners` / 登録 API が無いため ROTO を使えない。更新・再起動は lead が担当する。
 - 台帳は midistage の `settings.json`。Ladyland は起動・再接続時に `SetDeviceSetups` で席 0–3 を登録する。
   席 4・5 の旧配置掃除は廃止する。VP の席 6 にも触れない。
 - 長押しで INST 冊へ移るときは `SelectSetup(device_id, lease_token, setup: 2)` を使う。

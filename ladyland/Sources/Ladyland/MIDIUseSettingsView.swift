@@ -21,6 +21,10 @@ struct MIDIUseSettingsView: View {
             if let error = session.rotoSetupError {
                 Text("ROTO 設定エラー: \(error)").font(.caption).foregroundStyle(.red)
             }
+            if session.devices.contains(where: { $0.profileID == "roto" && $0.setupOwners == nil }) {
+                Text("ROTO を使うには MIDI サービスの更新が必要です。サービスを更新してから Ladyland を再起動してください。")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(session.devices) { device in
