@@ -1,7 +1,8 @@
 //! アドミンポートのシリアル I/O（POSIX、依存なし）。
 //!
 //! フレーミングは `RotoAdmin`（純粋層）、こちらは線の世話だけ。
-//! RigBench の roto-admin と Ladyland 本体（直接焼き）が共有する。
+//! RigBench の調査ベンチ専用。Ladyland 本体にはリンクしない。
+//! 通常の切替え・読み書きは midistage 経由（docs/roto-control/admin-port.md）。
 //!
 //! ## 掟: 瞬間芸（open → 用事 → close）
 //!
@@ -16,6 +17,7 @@
 
 import Darwin
 import Foundation
+import RotoKit
 
 public enum RotoAdminPortError: Error, CustomStringConvertible {
     case notFound(candidates: [String])

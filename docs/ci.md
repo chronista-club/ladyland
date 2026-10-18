@@ -1,7 +1,8 @@
 # CI — makomac の self-hosted runner
 
 2026-08-09 導入（mako 裁定: self-hosted / フルマトリクス毎回 / 実 AU テスト込み）。
-workflow は `.github/workflows/ci.yml`、検証内容は `scripts/test-matrix.sh` が正典。
+workflow は `.github/workflows/ci.yml`。まず `scripts/test-roto-midistage.sh` で ROTO の
+unit / transport 回帰を実行し、その後 `scripts/test-matrix.sh` のフルマトリクスを回す。
 
 ## なぜ self-hosted か
 
@@ -20,6 +21,20 @@ workflow は `.github/workflows/ci.yml`、検証内容は `scripts/test-matrix.s
 
 - `/Users/makomac/repos/creo-ui` と `/Users/makomac/repos/club-unison` が存在すること — workflow が workspace の隣へ symlink して `ladyland/Package.swift` のパス依存を解決する（開発レーンの `.vp/lanes/` 踏み台と同じ実体）。⚠️ **Package.swift にパス依存を足したら workflow の symlink 節にも足す**
 - runner は LaunchAgent（ユーザーセッション常駐）。**ログイン中だけ動く** — daemon 化すると CoreAudio / AU カタログに触れなくなるので変えないこと
+- ROTO fixture のビルドには Homebrew の `rustup`（`/opt/homebrew/bin`）と Python 3 が必要。
+  上流の `rust-toolchain.toml` の版（現在 `1.96.0`）を `rustup run --install` で用意して Cargo を呼ぶ。
+  グローバルの既定 toolchain や、対話シェルの mise / cargo shim に依存しない。
+
+## ROTO の隔離結合テスト
+
+`scripts/test-roto-midistage.sh` は SwiftPM resolve 後の midistage checkout が
+`ladyland/Package.resolved` の revision（現在 `fc9360e`）と一致し、変更がないことを確認する。
+そのソースと同じ `Cargo.lock` から `protocol_fixture` を `--locked` でビルドし、
+`MIDISTAGE_TEST_SERVER` を設定して Swift テストを実行する。lane の手元バイナリのパスは使わない。
+ビルド・revision 確認・テストのどれかが失敗したら CI step も失敗する。
+
+fixture は `nativeMIDI=false` とテストごとの一時 state/endpoint を使い、常駐 daemon・実機には触れない。
+通常の `swift test` では transport テストをスキップするため、この CI step を省略しない。
 
 ## runner の登録（再セットアップが要るとき）
 
