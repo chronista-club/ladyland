@@ -292,8 +292,8 @@ struct RotoMidiSetupExportTests {
     @Test func 全席は設定か掃除のどちらか() {
         let requests = RotoMidiSetupExport.allRequests(
             slotNames: names, seatLabels: [0: "Cutoff"])
-        // 冊名 4 + (ノブ 32 + ボタン 32) × 4 冊 + 掃除冊（名前 1 + 64 席）× 2
-        #expect(requests.count == 4 + 64 * 4 + 65 * RotoMidiSetupExport.scrubSetups.count)
+        // 冊名 4 + (ノブ 32 + ボタン 32) × 4 冊。担当外の席は掃除しない。
+        #expect(requests.count == 4 + 64 * 4)
         func isClear(_ request: [UInt8]) -> Bool {
             request.count > 2 && request[2] == RotoAdmin.Midi.clearControlConfig
         }
@@ -313,12 +313,7 @@ struct RotoMidiSetupExportTests {
             $0.key.setup == RotoMidiSetupExport.instSetup1 && $0.key.kind == .button
         }
         #expect(instButtons.allSatisfy { isClear($0.request) })
-        // 掃除冊（SETUP 05/06 — 旧配置の残骸）: 冊名は工場既定へ、全 64 席 clear
-        for setup in RotoMidiSetupExport.scrubSetups {
-            let scrub = requests.filter { $0.key.setup == setup }
-            #expect(scrub.count == 65)
-            #expect(scrub.filter { $0.key.kind != .name }.allSatisfy { isClear($0.request) })
-        }
+
     }
 
     /// 席冊 2 冊で帯 CC0-63 を過不足なく覆う — Keystage と同じ地図であること

@@ -38,3 +38,35 @@ OFF・他アプリへの譲渡でも Jack の部品と束縛は保持。再起�
 ## Status log
 
 - 2026-10-07: 機材別 ON/OFF と明示的な引き継ぎの構想を承認。Swift / Rust 共通契約と遅延送信停止の検証から着手。
+
+## ROTO の setup と引き継ぎ（2026-10-18）
+
+この節は design 10 の共通サービス方式に従う。旧来の各アプリ直接接続案を復活させない。
+関連: `mem_1Cg9RCew1FXTqxVCJjgcrs`、midistage `docs/design/06-roto-setups.md` と `schemas/midistage.kdl`。
+
+- Serial/admin port の開閉は midistaged に集約する。Ladyland 本体からの直接 open は廃止する。
+- 接続時に `SetDeviceSetups(device_id: "roto", setups: [0, 1, 2, 3])` で自分の冊だけを登録する。
+  旧配置の掃除対象だった席 4・5 も、VP の席 6 も登録・書き込み対象にしない。
+- MIXER ボタンの長押しは、現在の lease token を付けた `SelectSetup(setup: 2)` で INST 冊へ移動する。
+  受付は書き込み完了ではない。完了・失敗は snapshot で確認する。
+- `configuring` 中と `config_error` がある間は ROTO の入力・出力を止める。
+  使用権があり、設定が成功して `configuring` が外れたら再取得し、既存の `RotoMidiSync` をリセットして値を送り直す。
+  ポーリング間に完了した切り替えも `current_setup` の変化で同期をリセットする。
+- 切替要求・受信 loop・終了処理は機材ごとの送信終了待ちを共有する。
+  長押しの停止処理中に takeover が来ても、drain 完了前に `quiesced` や再取得へ進まない。
+- 設定失敗は MIDI 設定画面へ表示する。サービスが利用できないとき、直接 Serial へフォールバックしない。
+
+### 書き込みの移行境界
+
+SDK の固定版は midistage nightly `03793029fbc726c1b2431ea66862c46cdb398424`（PR #31）。
+`ApplyDeviceSetup` の型とメソッドは存在するが、この版のサービス本体は `not_implemented` を返す。
+このため全焼き・自動差分焼きは停止し、ROTO 設定画面には「書き込み準備中」と JSON export を残す。
+旧 Darwin 通知も書き込み不可を明示し、ローカルの `roto-shadow.json` は読み込まず、更新・削除もしない。
+Serial I/O の実装自体を RotoKit から調査用 RigBench へ移し、Ladyland 製品の依存から外す。
+
+次段では `RotoMidiSetupExport.books` を `SetupContent` に変換して冊単位で `ApplyDeviceSetup` へ渡す。
+席単位の差分・バックアップ・読み戻しはサービスが担当する。受付応答は `configuring=true` であることを確認し、
+その後の同一 lease の snapshot が `false` かつ `config_error` なしになるまで成功扱いしない。
+
+実機の切り替え・書き込みは mako の合図後に行う。lane のテストは模擬 snapshot / loopback に限定し、
+`/Applications/Ladyland.app` の差し替えと midistaged の再起動は lead が担当する。

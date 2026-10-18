@@ -172,7 +172,6 @@ final class AppState: ObservableObject {
         if let index = slot.knobMappings.firstIndex(where: { $0.knob == cc }) {
             slot.knobMappings[index].color = color
             knobMappingsChanged()  // 常時保存（knobs は SlotSnapshot に乗る）
-            scheduleRotoLiveBurn()  // 実機の席色が変わる
         } else {
             // didSet で実機へ即時反映 + 保存
             rotoColors.setCellColor(track: slot.index, cell: cc, to: color)
@@ -227,7 +226,6 @@ final class AppState: ObservableObject {
             guard rotoColors != oldValue else { return }
             roto.colors = rotoColors
             scheduleAutosave()  // [常時保存 22] ROTO の配色
-            scheduleRotoLiveBurn()  // 席色（trackCells）は INST 冊の焼き色にも出る
         }
     }
 
@@ -447,199 +445,21 @@ final class AppState: ObservableObject {
         return labels
     }
 
-    /// 3 冊 96 席をアドミンポートへ直接焼く。ブロッキング I/O なので main から
-    /// 降ろす — 焼いている数秒は実機の CC が止まる（瞬間芸の掟。RotoAdminPort）。
-    /// 結果は `rotoBurnResult` と NSLog の両方へ — 外部トリガーから呼ばれた
-    /// ときはログと実機読み戻し（roto-admin info）が観測面になる。
-    /// 成功したら差分焼きの影（`rotoDiffShadow`）をここで初期化する —
-    /// 以降はライブラベル・カラーの変更が自動で差分焼きされる
+    /// ApplyDeviceSetup の本体提供までは直接 Serial へフォールバックしない。
+    /// 旧 Darwin 通知の入口も、書き込み済みと誤認させず明示的に止める。
     func burnRotoSetups() {
-        let gate = roto.workGate
-        guard let stamp = gate.stamp else { return }
-        NSLog("roto: burn 入口")
-        rotoBurnResult = "焼き込み中…（数秒。ROTO-SETUP は閉じておく）"
-        rotoShadowStatus = .burning("全冊")
-        let names = rotoMixerSlotNames()
-        let colors = rotoMixerSlotColors()
-        let labels = rotoSeatLabels()
-        let seatColor = rack.selectedSlot.rotoColor
-        let cellColors = rotoSeatCellColors()
-        let selectedTrack = rack.selected + 1
-        let buttonColor = rotoColors.selectButton
-        NSLog("roto: burn 材料そろった — detached へ")
-        Task.detached(priority: .userInitiated) {
-            guard let work = gate.begin(stamp) else { return }
-            defer { work.finish() }
-            NSLog("roto: burn detached 開始")
-            let outcome: (summary: String, requests: [(key: RotoMidiSetupExport.SeatKey, request: [UInt8])]?)
-            do {
-                let burned = try RotoMidiSetupExport.burn(
-                    slotNames: names, slotColors: colors,
-                    seatLabels: labels, seatColor: seatColor,
-                    seatCellColors: cellColors,
-                    selectedTrack: selectedTrack,
-                    selectButtonColor: buttonColor)
-                outcome = (burned.summary, burned.requests)
-            } catch {
-                outcome = ("焼き込み失敗: \(error)", nil)
-            }
-            NSLog("roto: burn — %@", outcome.summary)
-            await MainActor.run {
-                    guard work.isCurrent else { return }
-                self.rotoBurnResult = outcome.summary
-                if let requests = outcome.requests {
-                    self.rotoDiffShadow.prime(requests)
-                    self.rotoShadowStatus = .synced("全冊 \(Self.shadowClock())")
-                } else {
-                    self.rotoDiffShadow.invalidate()
-                    self.rotoShadowStatus = .unprimed
-                }
-                self.saveRotoShadow()
-            }
-        }
+        let message = "ROTO の書き込みは準備中です。JSON 書き出しをご利用ください。"
+        rotoBurnResult = message
+        NSLog("roto: %@", message)
     }
 
-    // MARK: - 差分焼き（mako 裁定 2026-08-12「選択変更で自動差分焼き」）
-
-    /// 影の状態（footer に常駐 — mako 要望 2026-08-13「shadow の状態って
-    /// そこにリアルタイム表示できる？」）。遷移は影を動かす場所でだけ更新する
-    enum RotoShadowStatus: Equatable {
-        case unprimed        // 影なし — 差分焼きは沈黙、全焼きが再出発点
-        case synced(String)  // 実機と一致（摘要 = 最後の動き）
-        case waiting         // デバウンス中 — 変更を束ねている
-        case burning(String)  // シリアルへ書き込み中（摘要 = 規模）
-        case portBusy        // ポートが取れない — リトライ待ち
-    }
-    @Published private(set) var rotoShadowStatus: RotoShadowStatus = .unprimed
-
-    /// 摘要に付ける時刻（HH:mm:ss — 「いつの同期か」が動きの証拠になる）
-    private static func shadowClock() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: Date())
-    }
-
-    /// 差分焼きの影（実機に焼いてある 192 席の姿。全焼きの成功で初期化、
-    /// ディスクにも残す — 再起動しても差分焼きが即効く）
-    private var rotoDiffShadow = RotoDiffShadow()
-
-    /// 影の保存先。実機の設定はフラッシュに残るのだから影も残す（対称）
-    private static var rotoShadowURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ladyland/roto-shadow.json")
-    }
-
-    /// 影が変わったら必ず呼ぶ（prime / pending 前進 / invalidate の後）
-    private func saveRotoShadow() {
-        guard let data = try? JSONEncoder().encode(rotoDiffShadow) else { return }
-        try? data.write(to: Self.rotoShadowURL, options: .atomic)
-    }
-
-    /// 起動時に影を読み戻す（無ければ未 prime のまま = 全焼きが再出発点）
-    private func loadRotoShadow() {
-        guard let data = try? Data(contentsOf: Self.rotoShadowURL),
-            let restored = try? JSONDecoder().decode(RotoDiffShadow.self, from: data)
-        else { return }
-        rotoDiffShadow = restored
-        if restored.isPrimed {
-            rotoShadowStatus = .synced("復元")
-            NSLog("roto: 影を復元 — 差分焼きは再起動をまたいで有効")
-        }
-    }
-
-    /// 予約中の差分焼き（デバウンス — 選択の連打は静まってから 1 発）
-    private var rotoLiveBurnTask: Task<Void, Never>?
-
-    /// **席の見た目が変わりうる操作の後に呼ぶ**（`updateRouting` に相乗り +
-    /// トラック名・カラー変更）。1 秒のデバウンスで束ね、影との差分だけを
-    /// シリアルへ撃つ。焼き中は CC が止まるので、**操作が静まるのを待ってから
-    /// 1 発** — 選択を連打しても止まるのは最後の 1 回ぶんだけ。
-    /// 影が無い間（全焼き前 / 失敗後）は沈黙 — 「ROTO へ直接焼く」が再出発点
-    func scheduleRotoLiveBurn() {
-        guard rotoDiffShadow.isPrimed, roto.connected else { return }
-        rotoLiveBurnTask?.cancel()
-        rotoShadowStatus = .waiting
-        rotoLiveBurnTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            self?.rotoLiveBurnTask = nil
-            self?.performRotoLiveBurn()
-        }
-    }
-
-    private func performRotoLiveBurn() {
-        let gate = roto.workGate
-        guard let stamp = gate.stamp else { return }
-        let requests = RotoMidiSetupExport.allRequests(
-            slotNames: rotoMixerSlotNames(),
-            slotColors: rotoMixerSlotColors(),
-            seatLabels: rotoSeatLabels(),
-            seatColor: rack.selectedSlot.rotoColor,
-            seatCellColors: rotoSeatCellColors(),
-            selectedTrack: rack.selected + 1,
-            selectButtonColor: rotoColors.selectButton)
-        let pending = rotoDiffShadow.pending(requests)
-        guard !pending.isEmpty else {
-            rotoShadowStatus = .synced("差分なし \(Self.shadowClock())")
-            return
-        }
-        rotoShadowStatus = .burning("\(pending.count) 席")
-        Task.detached(priority: .userInitiated) {
-            guard let work = gate.begin(stamp) else { return }
-            defer { work.finish() }
-            do {
-                let summary = try RotoMidiSetupExport.burnDiff(pending)
-                NSLog("roto: 差分焼き — %@", summary)
-                // ⚠️ **ディスク保存は焼きが成功してから**。pending 直後に保存
-                // する楽観方式は、焼き完了前の quit（--reinstall）で「影だけ
-                // 進んで実機に書かれない」乖離を作った — 影が期待と一致して
-                // diff が出ず、実機の古い表示が直らない（実例 2026-08-13:
-                // L02 INST #25 / L03 INST2 #2 の冊名割れ）。成功後保存なら
-                // quit で焼きが飛んでもディスクは古いまま = 次回起動で自己修復
-                await MainActor.run {
-                    guard work.isCurrent else { return }
-                    self.saveRotoShadow()
-                    self.rotoShadowStatus = .synced("\(pending.count) 席 \(Self.shadowClock())")
-                }
-            } catch RotoMidiSetupExport.BurnDiffError.nothingWritten(let underlying) {
-                // 1 件も書く前の失敗（ポート使用中 = 読み戻しベンチとの競合、
-                // 探索失敗）— **実機は無傷なので影を捨てない**。ディスクの影
-                // （前回成功時の姿）をメモリへ読み戻して仕切り直し、少し
-                // 待ってから再試行（実例 2026-08-13: 競合タイムアウトで影を
-                // 捨てて追従が止まった — 一時的な失敗で死なない設計へ）
-                NSLog("roto: 差分焼き — ポートが取れない（%@）。リトライ",
-                    String(describing: underlying))
-                await MainActor.run {
-                    guard work.isCurrent else { return }
-                    self.rotoShadowStatus = .portBusy
-                    self.loadRotoShadow()
-                    self.scheduleRotoLiveBurn()  // → .waiting（primed なら）
-                }
-            } catch {
-                // 途中まで書けた — どこまで実機に入ったか分からないので
-                // 影ごと捨てて差分焼きを黙らせる（全焼きボタンで信頼を再出発）
-                NSLog("roto: 差分焼き失敗 — 影を捨てて停止: %@", String(describing: error))
-                await MainActor.run {
-                    guard work.isCurrent else { return }
-                    self.rotoDiffShadow.invalidate()
-                    self.saveRotoShadow()
-                    self.rotoShadowStatus = .unprimed
-                }
-            }
-        }
-    }
-
-    /// エージェントの外部トリガー（mako 要望 2026-08-12「ROTO へ直接焼くの
-    /// 経路をそちらで打てたりしないの？」）。ターミナルから
-    /// `notifyutil -p club.chronista.ladyland.roto.burn` で UI ボタンと同じ
-    /// 焼きが走る。Darwin 通知はローカル専用・引数なしの最小口 —
-    /// 引数が要る操作が増えたら unison サーバーへ昇格する
+    /// 旧外部トリガーは残すが、Apply 対応までは書き込み不可を明示する。
     private func installAgentTriggers() {
         var token: Int32 = 0
         notify_register_dispatch(
             "club.chronista.ladyland.roto.burn", &token, DispatchQueue.main
         ) { [weak self] _ in
-            NSLog("roto: 外部トリガー受信 — 冊を焼く")
+            NSLog("roto: 外部トリガー受信 — 書き込み準備中")
             self?.burnRotoSetups()
         }
         agentTriggerTokens.append(token)
@@ -790,6 +610,10 @@ final class AppState: ObservableObject {
 
     private func bindMIDIUseSession() {
         let access = midiUse.access
+        roto.onSelectSetup = { [weak self] setup in
+            guard let self else { throw MIDIUseError.unavailable }
+            try await self.midiUse.selectRotoSetup(setup)
+        }
         MIDISysExSender.setEndpointAccess(input: { access.allowsInput($0) },
                                          output: { access.allowsOutput($0) })
         ledBus.setDeviceAvailable(false)
@@ -805,7 +629,6 @@ final class AppState: ObservableObject {
                 self.ledBus.setDeviceAvailable(false)
                 self.lpd8Editor.releaseDevice()
             case "roto":
-                self.rotoLiveBurnTask?.cancel()
                 await self.roto.releaseDevice()
             case "keystage": await self.keystage.releaseDevice()
             case "xtouch": await self.xtouch.stop()
@@ -843,9 +666,6 @@ final class AppState: ObservableObject {
         // 以降の起動ログも全部乗る）
         debugLog.startCapture()
         debugLog.startFileLog()
-
-        // 差分焼きの影を読み戻す — 再起動のたびに全焼きしなくて済む
-        loadRotoShadow()
 
         // ⚠️ **rack の init は捕捉より前に走る**ので、そこで出したログは
         // ファイルに残らない。自作シンセが列挙に出たかはここで確かめる
@@ -1442,7 +1262,6 @@ final class AppState: ObservableObject {
     func setTrackColor(_ slot: InstrumentSlot, to color: UInt8?) {
         slot.rotoColor = color
         scheduleAutosave()  // [常時保存 26] トラックカラー
-        scheduleRotoLiveBurn()  // MIXER 席色 + INST 冊の席色が変わる
     }
 
     /// トラック名を設定する（Track 面。空・空白だけは nil = プラグイン名へ戻す）
@@ -1450,7 +1269,6 @@ final class AppState: ObservableObject {
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         slot.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed
         scheduleAutosave()  // [常時保存 27] トラック名
-        scheduleRotoLiveBurn()  // MIXER 冊の席名・ミュートボタン名が変わる
     }
 
     /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
@@ -1626,7 +1444,6 @@ final class AppState: ObservableObject {
         slot.knobMappings = entry.knobs
         rotoColors.trackCells[slot.index] = entry.cellColors.isEmpty ? nil : entry.cellColors
         knobMappingsChanged()  // ルーティング + 常時保存
-        scheduleRotoLiveBurn()  // INST 冊のラベル・席色が変わる
     }
 
     /// default 一式（page-defaults.kdl）を書き出す（mako 要望 2026-08-14
@@ -2084,8 +1901,5 @@ final class AppState: ObservableObject {
         // focus pane を選択に追従させる（選択・ロード・入替の全経路がここを通る）
         refreshFocusPane()
 
-        // ROTO の差分焼きも相乗り — 選択・ロード・入替・割当変更の全経路が
-        // ここを通る = INST 冊のライブラベルが変わりうる節目そのもの
-        scheduleRotoLiveBurn()
     }
 }

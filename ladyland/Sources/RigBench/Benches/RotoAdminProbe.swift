@@ -2,7 +2,7 @@
 //!
 //! ROTO-SETUP の app.asar 解剖で「設定読み書きは MIDI ではなくシリアル」と
 //! 確定した（docs/roto-control/admin-port.md）。フレーミングは RotoKit.RotoAdmin、
-//! 線の世話は RotoKit.RotoAdminPort（瞬間芸の掟もそちらのヘッダ参照）。
+//! 線の世話は RigBench の RotoAdminPort（瞬間芸の掟もそちらのヘッダ参照）。
 //!
 //! 段階:
 //!   swift run RigBench roto-admin              info: FW 版数 + 現在 setup +

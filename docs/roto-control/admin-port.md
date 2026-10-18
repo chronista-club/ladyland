@@ -6,6 +6,23 @@
 公式スクリプト完全地図（official-scripts-map.md）の姉妹編 — あちらは DAW セッション
 （MIDI SysEx）、こちらは**設定の読み書き（USB シリアル）**。
 
+## 現在の所有者（2026-10-18）
+
+**切替え・読み書きは midistage 経由**に集約する。Serial/admin port を開くのは midistaged だけで、
+Ladyland 本体は開かない。以下のバイト仕様と旧ベンチはプロトコルの調査記録として残す。
+
+- 台帳は midistage の `settings.json`。Ladyland は起動・再接続時に `SetDeviceSetups` で席 0–3 を登録する。
+  席 4・5 の旧配置掃除は廃止する。VP の席 6 にも触れない。
+- 長押しで INST 冊へ移るときは `SelectSetup(device_id, lease_token, setup: 2)` を使う。
+- `configuring` 中は入力・モーター送信を止める。成功後に同期し直し、`config_error` は設定画面へ出す。
+- 固定 SDK `0379302` は `ApplyDeviceSetup` の契約までで、本体は未実装。この段では全焼き・自動差分焼きを停止し、
+  JSON export を残す。旧いローカルの影を同期済みとは表示しない。次段の書き込みは冊単位でサービスへ渡す。
+- 読み出しの入口は midistage の `roto-dump`。この CLI も Serial を使うため、実行は lead がサービスとの排他を確認してから行う。
+  Ladyland から旧 `RigBench roto-admin` を自動実行しない。
+
+正本: midistage `docs/design/06-roto-setups.md` / `schemas/midistage.kdl`。
+利用側の引き継ぎは [design 09](../../design/09-midi-device-handoff.md#roto-の-setup-と引き継ぎ2026-10-18) を参照。
+
 ## なぜ重要か（mako 発案 2026-08-12「動的に ROTO を更新できたら開発捗るしね」）
 
 **MIDI setup の読み書きは MIDI ポートを通らない** — RP2040 の複合 USB デバイスが

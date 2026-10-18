@@ -465,7 +465,7 @@ struct ContentView: View {
             // 操作の知識: クリック=ロード/選択 1-8=選択 ⌘矢印=カーソル
             // ⌘⏎=draft 昇格 ←→=順送り ↑↓=音量 番号ドラッグ=並び替え Esc=全消音）
             HStack {
-                rotoShadowFooter
+                rotoStatusFooter
                 Spacer()
 
                 // PC キーボード演奏モード中の常駐表示（Tab で切替。
@@ -544,34 +544,21 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// ROTO 差分焼きの影の状態 — footer 常駐のリアルタイム表示（mako 要望
-    /// 2026-08-13「shadow の状態ってそこにリアルタイム表示できる？」）。
-    /// 同期は無彩色で静かに、影なし/ポート待ちだけ警告色（正常時は目立たない）
+    /// サービスの設定状態。旧いローカルの影を「同期済み」として表示しない。
     @ViewBuilder
-    private var rotoShadowFooter: some View {
+    private var rotoStatusFooter: some View {
+        let device = appState.midiUse.devices.first { $0.deviceID == "roto" }
         Group {
-            switch appState.rotoShadowStatus {
-            case .unprimed:
-                Text("影: なし")
-                    .foregroundColor(theme.semanticWarningText)
-                    .help("差分焼きは沈黙中 — ROTO Surface の全焼きが再出発点")
-            case .synced(let note):
-                Text("影: 同期（\(note)）")
-                    .foregroundColor(theme.textTertiary)
-            case .waiting:
-                Text("影: 差分待ち…")
-                    .foregroundColor(theme.textSecondary)
-            case .burning(let note):
-                Text("影: 焼き中（\(note)）")
-                    .foregroundColor(theme.brandPrimary)
-            case .portBusy:
-                Text("影: ポート待ち")
-                    .foregroundColor(theme.semanticWarningText)
-                    .help("シリアルポートが取れない — ROTO-SETUP が開いていないか確認")
+            if device?.configuring == true || appState.midiUse.rotoSelecting {
+                Text("ROTO: 設定中…").foregroundColor(theme.textSecondary)
+            } else if device?.configError != nil || appState.midiUse.rotoSetupError != nil {
+                Text("ROTO: 設定エラー").foregroundColor(theme.semanticWarningText)
+                    .help("設定の MIDI 機材で詳細を確認できます")
+            } else {
+                Text("ROTO: 書き込み準備中").foregroundColor(theme.textTertiary)
             }
         }
         .font(LadylandFont.caption)
-        .monospacedDigit()
     }
 
     // MARK: - トラックレーン（横一列。mako 裁定 2026-08-02）

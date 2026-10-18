@@ -59,9 +59,8 @@ struct RotoSettingsView: View {
                 GroupBox("冊の焼き込み") {
                     VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
                         HStack {
-                            Button("ROTO へ直接焼く（全 \(RotoMidiSetupExport.bookCount) 冊）") {
-                                appState.burnRotoSetups()
-                            }
+                            Text("書き込み準備中")
+                                .font(.caption).foregroundColor(Color.colorTextSecondary)
                             Button("JSON 書き出し（Import 用）") {
                                 exportMidiSetups()
                             }
@@ -88,12 +87,8 @@ struct RotoSettingsView: View {
         }
     }
 
-    // 影 / 面の状態 / ページの色は 2026-08-13 の整理で撤去した（DAW モードの
-    // 投影計器 — MIDI モード本線では映すものが無い）。実機の状態は焼きの
-    // 読み戻し（roto-admin read）と差分焼きの影（roto-shadow.json）が担う
-
-    // 焼き込み（burnRotoSetups）と席名（rotoMixerSlotNames）は AppState へ
-    // 移した — UI ボタンと外部トリガー（notifyutil）の共通入口にするため
+    // 書き込みの復帰は midistage ApplyDeviceSetup の本体提供後。
+    // この段では古いローカルの影を読み戻さず、JSON 控えだけを作る。
 
     /// 書き出し先を選ばせて Export All 互換フォルダを書き、Finder で見せる。
     /// ROTO-SETUP の Import All ダイアログへそのまま渡せる状態で終わる

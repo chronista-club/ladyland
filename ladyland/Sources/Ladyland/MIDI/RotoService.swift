@@ -49,6 +49,8 @@ final class RotoService {
     /// 選択の波及（ルーティング / LED / 差分焼き / 保存）は AppState.select に
     /// 一本化されているため、ここでは番号を渡すだけ
     var onSelectTrack: ((Int) -> Void)?
+    /// Serial の所有者は midistaged。現在の lease を持つ窓口へ切替を依頼する。
+    var onSelectSetup: ((Int) async throws -> Void)?
 
     // ── MIDI モードのモーター同期（RotoMidiSync.swift）──
     private var midiSync = RotoMidiSync()
@@ -591,15 +593,11 @@ final class RotoService {
     /// シリアル往復（数百 ms）の間は実機の CC が止まる — 冊の移動時なので無害
     private func jumpToInstBook() {
         guard let stamp = workGate.stamp else { return }
-        Task.detached(priority: .userInitiated) { [workGate] in
-            guard let work = workGate.begin(stamp) else { return }
-            defer { work.finish() }
+        Task { @MainActor [weak self] in
+            guard let self, self.workGate.stamp == stamp, let select = self.onSelectSetup else { return }
             do {
-                try RotoAdminPort.withPort { session in
-                    _ = try session.transact(
-                        RotoAdmin.setSetup(RotoMidiSetupExport.instSetup1), expecting: 0)
-                }
-                NSLog("roto: 長押し — INST 冊へ移動")
+                try await select(RotoMidiSetupExport.instSetup1)
+                NSLog("roto: 長押し — INST 冊への切替を依頼")
             } catch {
                 NSLog("roto: INST 冊への移動失敗 — %@", "\(error)")
             }

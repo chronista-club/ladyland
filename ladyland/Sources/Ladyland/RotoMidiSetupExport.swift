@@ -14,8 +14,8 @@
 //! オミット — 冊の移動は実機の SEL で。
 //!
 //! 実機への入れ方は 2 経路（同じビルダから生成 — 第 2 の定義を作らない）:
-//! 1. **直接焼き（本線）**: アドミンポートへ直接書く。ROTO-SETUP 不要・
-//!    差し直し不要・ライブ反映。⚠️ 焼いている数秒は実機の CC が止まる
+//! 1. **サービスへの書き込み**: midistage の ApplyDeviceSetup 本体待ち。
+//!    book を冊単位で渡す。Serial の開閉と席単位の差分は midistaged の責務
 //! 2. **Export All 互換 JSON**: ROTO-SETUP の File > Import 用（控え）
 //!
 //! ミキサー冊の席名は**焼いた時点のスロット名のスナップショット**。
@@ -59,12 +59,6 @@ enum RotoMidiSetupExport {
     /// INST 冊名のフォールバック（選択トラックが無いとき）
     static let instFallbackNames = ["INST-", "INST+"]
     static var bookCount: Int { 4 }
-
-    /// **丸ごと掃除する冊**。SETUP 05/06 = 旧配置の残骸（旧 05 = MIXER。
-    /// 06 は旧 MIXER 2 計画の予定地 — 未焼きだが念のため掃く）。
-    /// 冊名を工場既定の「SETUP nn」へ戻し、全 64 席を clear する。
-    /// 新しい実験冊が残骸になったらここへ番号を足す
-    static let scrubSetups = [4, 5]
 
     /// INST 冊名 = 「**TR{トラック番号}{-|+} {inst 名}**」（mako 裁定 2026-08-14
     /// 「-Tn は TRn-/+ に」— 記号は後置、- = P1-P4 / + = P5-P8。
@@ -258,10 +252,9 @@ enum RotoMidiSetupExport {
         }
     }
 
-    // MARK: - 経路 1: 直接焼き（アドミンポート）
+    // MARK: - 旧 admin 形式の生成器（製品からの送信なし）
 
-    /// 差分焼きの比較キー（冊 × 種別 × 席）。Codable なのは影の永続化のため
-    /// （`RotoDiffShadow` — 再起動しても差分焼きが即効く）
+    /// 冊 × 種別 × 席。Codable は旧 RotoDiffShadow の保存形式との互換用。
     struct SeatKey: Hashable, Codable {
         let setup: Int
         let kind: Kind
@@ -270,15 +263,13 @@ enum RotoMidiSetupExport {
         enum Kind: String, Hashable, Codable { case name, knob, button }
     }
 
-    /// 全冊の書き込みリクエストを列挙する — **全焼きと差分焼きの単一ソース**。
-    /// 比較はリクエストのバイト列そのもので行う(構造体の同値ではなく
-    /// 「実機に書かれるもの」を比べる — 生成器の変更も自然に差分になる)。
+    /// 自分の冊の旧形式リクエストを列挙する。生成器の回帰検証に残し、
+    /// 製品からは送信しない。次段の冊全体 payload も同じ builder を使う。
     ///
     /// **全席 = set XOR clear**(mako 指摘 2026-08-12「L02 INST はゴミが多い。
-    /// まっさらから作り直したほうがいい」): 3 冊 × ノブ 32 + ボタン 32 の全席が
+    /// まっさらから作り直したほうがいい」): 4 冊 × ノブ 32 + ボタン 32 の全席が
     /// 必ず載り、期待する席は set・それ以外は明示的に clear。焼くこと自体が
-    /// まっさら化なので、過去の実験の残骸が構造的に消える。割当を外した席も
-    /// set → clear のバイト列変化として差分焼きが拾う
+    /// まっさら化する内容になる。割当を外した席も clear として含む。
     static func allRequests(
         slotNames: [String],
         slotColors: [UInt8?] = [],
@@ -323,86 +314,7 @@ enum RotoMidiSetupExport {
                 ))
             }
         }
-        // 掃除冊 — 冊名を工場既定へ戻し、全席 clear（実験残骸の墓掃除）
-        for setup in scrubSetups {
-            requests.append((
-                SeatKey(setup: setup, kind: .name, control: 0),
-                RotoAdmin.setSetupName(
-                    index: setup, name: String(format: "SETUP %02d", setup + 1))
-            ))
-            for position in 0..<seatCount {
-                requests.append((
-                    SeatKey(setup: setup, kind: .knob, control: position),
-                    RotoAdmin.clearControl(setup: setup, button: false, control: position)
-                ))
-                requests.append((
-                    SeatKey(setup: setup, kind: .button, control: position),
-                    RotoAdmin.clearControl(setup: setup, button: true, control: position)
-                ))
-            }
-        }
         return requests
-    }
-
-    /// 全冊（冊名 + 96 席）をシリアルで直接焼く。**呼び手は main 以外で呼ぶ**
-    /// （ブロッキング I/O。全体で数秒 — その間実機の CC は止まる）。
-    /// 返り値は結果の 1 行（UI の結果表示用）と、焼いたリクエスト一覧
-    /// （差分焼きの影 `RotoDiffShadow` の初期化に使う）
-    static func burn(
-        slotNames: [String],
-        slotColors: [UInt8?] = [],
-        seatLabels: [Int: String] = [:],
-        seatColor: UInt8? = nil,
-        seatCellColors: [Int: UInt8] = [:],
-        selectedTrack: Int? = nil,
-        selectButtonColor: UInt8 = Roto.Color.darkGreen
-    ) throws -> (summary: String, requests: [(key: SeatKey, request: [UInt8])]) {
-        let requests = allRequests(
-            slotNames: slotNames, slotColors: slotColors,
-            seatLabels: seatLabels, seatColor: seatColor,
-            seatCellColors: seatCellColors,
-            selectedTrack: selectedTrack, selectButtonColor: selectButtonColor)
-        // フレームは `5A family sub …` — sub（index 2）が 0x09 なら clear
-        let cleared = requests.count { $0.request.count > 2
-            && $0.request[2] == RotoAdmin.Midi.clearControlConfig }
-        let summary = try RotoAdminPort.withPort { session in
-            for (_, request) in requests {
-                try session.configUpdate(request)
-            }
-            return "\(bookCount) 冊: 設定 \(requests.count - bookCount - cleared) 席"
-                + " + 掃除 \(cleared) 席（FW \(session.version.description)）"
-        }
-        return (summary, requests)
-    }
-
-    /// 差分焼きの失敗の区別 — **影の扱いが変わる**ので呼び手が見る。
-    /// nothingWritten = 1 件も書く前に失敗（ポート使用中・探索失敗）—
-    /// 実機は無傷なので影を捨てる必要はない（リトライで足りる）。
-    /// partiallyWritten = 途中まで書けた — どこまで入ったか信用できないので
-    /// 影ごと捨てて全焼きで再出発
-    enum BurnDiffError: Error {
-        case nothingWritten(underlying: Error)
-        case partiallyWritten(written: Int, underlying: Error)
-    }
-
-    /// 差分だけをシリアルで撃つ（変わった席が少なければ数百 ms — 全焼きの
-    /// 数秒に対して、曲中の選択切替にも耐える短さ。それでも CC は止まるので
-    /// 呼び手がデバウンスで束ねる）
-    static func burnDiff(_ requests: [[UInt8]]) throws -> String {
-        var written = 0
-        do {
-            return try RotoAdminPort.withPort { session in
-                for request in requests {
-                    try session.configUpdate(request)
-                    written += 1
-                }
-                return "\(requests.count) 席を差分焼き（FW \(session.version.description)）"
-            }
-        } catch {
-            throw written == 0
-                ? BurnDiffError.nothingWritten(underlying: error)
-                : BurnDiffError.partiallyWritten(written: written, underlying: error)
-        }
     }
 
     // MARK: - 経路 2: Export All 互換 JSON

@@ -18,6 +18,9 @@ struct MIDIUseSettingsView: View {
                     .foregroundStyle(.orange)
             }
             if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+            if let error = session.rotoSetupError {
+                Text("ROTO 設定エラー: \(error)").font(.caption).foregroundStyle(.red)
+            }
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(session.devices) { device in
@@ -57,6 +60,8 @@ struct MIDIUseSettingsView: View {
     private func status(_ device: DeviceView) -> String {
         if let error = device.error { return "接続エラー: \(error)" }
         if device.phase == "releasing" { return "切り替え中…" }
+        if device.configuring == true || (device.profileID == "roto" && session.rotoSelecting) { return "設定を反映中…" }
+        if let error = device.configError { return "設定エラー: \(error)" }
         if !device.present {
             if ["roto", "lpd8", "nanokontrol"].contains(device.profileID), device.assignment.clientID == "ladyland" {
                 return "使用 ON・機材が見つかりません。接続すると再開します。"
