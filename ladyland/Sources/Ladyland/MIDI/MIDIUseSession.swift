@@ -113,8 +113,7 @@ final class MIDIUseSession: ObservableObject {
             if self.client === client,
                let latest = devices.first(where: { $0.deviceID == "roto" }),
                owns(latest), latest.lease?.token == token {
-                rotoSetupError = error.localizedDescription
-                rotoErrorLease = token
+                noteRotoFailure(error.localizedDescription, lease: token)
             }
             throw error
         }
@@ -167,8 +166,7 @@ final class MIDIUseSession: ObservableObject {
             if self.client === client,
                let latest = devices.first(where: { $0.deviceID == device.deviceID }),
                owns(latest), latest.lease?.token == token {
-                rotoSetupError = error.localizedDescription
-                rotoErrorLease = token
+                noteRotoFailure(error.localizedDescription, lease: token)
             }
             throw error
         }
@@ -209,7 +207,7 @@ final class MIDIUseSession: ObservableObject {
             && incoming.devices.first(where: { $0.deviceID == "roto" })?.lease?.token != rotoErrorLease
         usable.devices = incoming.devices.filter { device in
             guard device.profileID == "roto" else { return true }
-            return !rotoConfiguring && (rotoSetupError == nil || staleSelectionError)
+            return !rotoConfiguring
                 && device.configuring == false && device.configError == nil
                 && device.currentSetup.map { Self.rotoSetups.contains($0)
                     && device.setupOwners?["ladyland"]?.contains($0) == true } == true
@@ -235,6 +233,15 @@ final class MIDIUseSession: ObservableObject {
         }
         onSnapshot?(incoming)
     }
+    /// Ladyland 側の失敗（応答待ちのタイムアウト、受付を確認できない等）を記録する。
+    /// **画面に出すだけで、ROTO は止めない**（VP lead review M1、2026-10-19 lead 判断:
+    /// 一過性の失敗で演奏を止めない）。止めるのはサービスの `config_error` /
+    /// `configuring` と、Ladyland の席が出ていないときだけ。表示は次の成功か lease 交代で消える
+    func noteRotoFailure(_ message: String, lease: String) {
+        rotoSetupError = message
+        rotoErrorLease = lease
+    }
+
     nonisolated static let rotoSetups = [0, 1, 2, 3]
     private func release(_ id: String) async {
         if let pending = releases[id] { await pending.value; return }
