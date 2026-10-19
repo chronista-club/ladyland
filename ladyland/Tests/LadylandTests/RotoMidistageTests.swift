@@ -42,6 +42,23 @@ struct RotoMidistageTests {
         #expect(acquired == ["lpd", "roto"])
     }
 
+    /// VP lead review M1（2026-10-19）: Ladyland 側の失敗（応答待ちのタイムアウト等）は
+    /// エラーを画面に出すだけで、**サービスが正常な間は ROTO を止めない** — 一過性の
+    /// 失敗で演奏が止まらないように。止めるのはサービスの `config_error` / `configuring` だけ
+    @Test func clientSideFailureKeepsRotoPlayable() async throws {
+        let session = MIDIUseSession()
+        var acquired: [String] = []
+        session.onAcquired = { acquired.append($0.deviceID) }
+        await session.apply(try rotoSnapshot(sequence: 1))
+        #expect(Set(acquired) == ["lpd", "roto"])
+        let token = try #require(session.devices.first { $0.deviceID == "roto" }?.lease?.token)
+        session.noteRotoFailure("ROTO の書き込みが時間内に完了しませんでした。", lease: token)
+        await session.apply(try rotoSnapshot(sequence: 2))
+        #expect(session.access.allowsOutput("roto output"), "サービスが正常なら ROTO は使える")
+        #expect(session.access.allowsInput("roto input"))
+        #expect(session.rotoSetupError != nil, "エラーは消さずに画面に残す")
+    }
+
     @Test func waitsUntilLadylandsRegisteredSetupIsCurrent() async throws {
         let session = MIDIUseSession()
         for (index, setup) in [nil, 8].enumerated() {
