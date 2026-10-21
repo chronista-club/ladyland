@@ -67,7 +67,7 @@ fn control_to_cc(control: &ControlChange) -> Option<(u8, u8)> {
         ControlChange::GeneralPurpose3(v) => (18, msb(v)),
         ControlChange::GeneralPurpose4(v) => (19, msb(v)),
         // CC 3/9/14/15/20-31（未定義帯。ParamBridge が使う）
-        ControlChange::UndefinedHighRes {
+        ControlChange::CCHighRes {
             control1, value, ..
         } => (control1, msb(value)),
 
@@ -113,7 +113,7 @@ fn control_to_cc(control: &ControlChange) -> Option<(u8, u8)> {
         ControlChange::DataEntry2(msb_v, _lsb) => (6, msb_v),
 
         // その他すべて（CC 9/14/15 等の生値を含む）
-        ControlChange::Undefined { control, value } => (control, value),
+        ControlChange::CC { control, value } => (control, value),
 
         // NRPN/RPN は CC 98-101 のシーケンスで表現される別系統のため、
         // 単発の CC としては扱わない（必要になったら専用イベントを起こす）
