@@ -55,6 +55,11 @@ struct SurfaceContent: View {
             // Jack 結線図（spec/09 — 機材 → Jack → Track の見取り図。
             // 演奏前チェック: いま誰がどこ？が一目）
             JackBoardView()
+        case .mixer:
+            // 8ch ミキサー（mako 火花 2026-10-01 — MIXER Jack の画面側の顔）
+            MixerView()
+        case .xtouch:
+            XTouchSurfaceView(controller: appState.xtouch, rack: appState.rack)
         case .track:
             EmptyView()
         }

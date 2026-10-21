@@ -5,16 +5,18 @@ import PackageDescription
 let package = Package(
     name: "ladyland",
     platforms: [
-        .macOS(.v14)
+        // macOS 15 — 3D の机（RealityKit の RealityView / 部品を掴むジェスチャ）が
+        // macOS 15 から（2026-10-04）
+        .macOS(.v15)
     ],
     dependencies: [
+        .package(url: "https://github.com/chronista-club/midistage.git", revision: "fc9360edc2e31aa19eafa08dc35e716892517ef8"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
         // 「path 依存で共有」パターン（cortex ↔ midistage-profiles と同型）
         .package(path: "../../creo-ui/packages/swift"),
-        // Unison Protocol クライアント（Field 接続 — design/07。QUIC + protobuf、
-        // server は fieldd (Rust)。creo-ui と同じ艦隊 path 依存パターン）
-        .package(path: "../../club-unison"),
+        // Field と MidistageClient は同じ Unison package identity / version を使う。
+        .package(url: "https://github.com/chronista-club/club-unison.git", exact: "2.0.0"),
         // 永続化の SSOT（mako 裁定 2026-08-02「GRDB 導入しよう。ここが SSOT」）。
         // SQLite ツールキット — 接続を直接触らせない設計（DatabaseQueue が
         // 書き込みを直列化）なので、競合を「解決」せず存在させない構造に載る
@@ -55,6 +57,7 @@ let package = Package(
                 "Lpd8Kit",
                 "RotoKit",
                 "KeystageKit",
+                .product(name: "MidistageClient", package: "midistage"),
                 .product(name: "CreoUI", package: "swift"),
                 .product(name: "UnisonClient", package: "club-unison"),
                 .product(name: "GRDB", package: "GRDB.swift")

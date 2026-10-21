@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+<title>Ladyland — billboard</title>
+<metadata id="ladyland-logo-model">{"version":1,"gap":0.32,"radius":0.18,"inset":0.18,"plateRadius":0.2996,"depth":80,"litColumn":3,"litRow":1,"color":"#bd6565","background":"#092634","dim":0.41,"glow":0.88,"roughness":0.42,"lightAngle":-6,"lightIntensity":4.8}</metadata>
+<defs><filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="18.58065"/></filter></defs>
+<rect x="100" y="100" width="800" height="800" rx="239.68" fill="#092634" stroke="#bd6565" stroke-opacity="0.18" stroke-width="6"/>
+<rect data-tile="0,0" data-lit="false" x="244" y="244" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="1,0" data-lit="false" x="380.25806" y="244" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="2,0" data-lit="false" x="516.51613" y="244" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="3,0" data-lit="false" x="652.77419" y="244" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="0,1" data-lit="false" x="244" y="429.67033" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="1,1" data-lit="false" x="380.25806" y="429.67033" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="2,1" data-lit="false" x="516.51613" y="429.67033" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect x="652.77419" y="429.67033" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" opacity="0.88" filter="url(#glow)"/>
+<rect data-tile="3,1" data-lit="true" x="652.77419" y="429.67033" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="1"/>
+<rect data-tile="0,2" data-lit="false" x="244" y="615.34066" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="1,2" data-lit="false" x="380.25806" y="615.34066" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="2,2" data-lit="false" x="516.51613" y="615.34066" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+<rect data-tile="3,2" data-lit="false" x="652.77419" y="615.34066" width="103.22581" height="140.65934" rx="18.58065" fill="#bd6565" fill-opacity="0.41"/>
+</svg>

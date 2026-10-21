@@ -53,10 +53,10 @@ impl TextOverlay {
         let metrics = Metrics::new(FONT_SIZE, LINE_HEIGHT);
 
         let mut filename_buffer = Buffer::new(&mut font_system, metrics);
-        filename_buffer.set_size(&mut font_system, Some(width as f32), Some(LINE_HEIGHT));
+        filename_buffer.set_size(Some(width as f32), Some(LINE_HEIGHT));
 
         let mut timestamp_buffer = Buffer::new(&mut font_system, metrics);
-        timestamp_buffer.set_size(&mut font_system, Some(width as f32), Some(LINE_HEIGHT));
+        timestamp_buffer.set_size(Some(width as f32), Some(LINE_HEIGHT));
 
         Self {
             font_system,
@@ -85,7 +85,6 @@ impl TextOverlay {
         if self.current_filename != filename {
             self.current_filename = filename.to_string();
             self.filename_buffer.set_text(
-                &mut self.font_system,
                 filename,
                 &Attrs::new().family(Family::SansSerif),
                 Shaping::Advanced,
@@ -104,7 +103,6 @@ impl TextOverlay {
         if self.current_timestamp != ts {
             self.current_timestamp = ts.clone();
             self.timestamp_buffer.set_text(
-                &mut self.font_system,
                 &ts,
                 &Attrs::new().family(Family::Monospace),
                 Shaping::Advanced,
@@ -188,8 +186,8 @@ impl TextOverlay {
         self.width = width;
         self.height = height;
         self.filename_buffer
-            .set_size(&mut self.font_system, Some(width as f32), Some(LINE_HEIGHT));
+            .set_size(Some(width as f32), Some(LINE_HEIGHT));
         self.timestamp_buffer
-            .set_size(&mut self.font_system, Some(width as f32), Some(LINE_HEIGHT));
+            .set_size(Some(width as f32), Some(LINE_HEIGHT));
     }
 }

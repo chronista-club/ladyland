@@ -15,6 +15,7 @@ import AVFoundation
 import CoreMIDI
 import KeystageKit
 import Lpd8Kit
+import MidistageClient
 
 /// UMP（Universal MIDI Packet）の解析 — 純関数（テスト対象）
 enum UMP {
@@ -183,6 +184,63 @@ final class MIDIRouter: @unchecked Sendable {
     private var keyboardTarget: AVAudioUnitMIDIInstrument?
     private var drumsTarget: AVAudioUnitMIDIInstrument?
 
+    private struct VoiceState {
+        var target: AVAudioUnitMIDIInstrument?
+        var notes = NoteLatch()
+        var pedalChannels: Set<UInt8> = []
+    }
+    private var deviceVoices: [String: [ObjectIdentifier?: VoiceState]] = [:]
+
+    private func sendDevice(_ deviceID: String, target: AVAudioUnitMIDIInstrument?, status: UInt8, data1: UInt8, data2: UInt8) {
+        lock.lock()
+        let key = target.map(ObjectIdentifier.init)
+        var voice = deviceVoices[deviceID]?[key] ?? VoiceState(target: target)
+        switch status & 0xf0 {
+        case 0x90 where data2 > 0: voice.notes.noteOn(data1, channel: status & 0x0f)
+        case 0x80, 0x90: _ = voice.notes.shouldSendNoteOff(data1)
+        case 0xb0 where data1 == 64:
+            _ = voice.notes.pedal(data2)
+            if data2 >= NoteLatch.engageAt { voice.pedalChannels.insert(status & 0x0f) }
+            else if data2 <= NoteLatch.releaseAt { voice.pedalChannels.remove(status & 0x0f) }
+        default: break
+        }
+        deviceVoices[deviceID, default: [:]][key] = voice
+        lock.unlock()
+        target?.sendMIDIEvent(status, data1: data1, data2: data2)
+    }
+
+    /// 入力 gate を閉じ、その callback が戻ってから呼ぶ。結線先の割当は変えない。
+    @discardableResult
+    func releaseDevice(_ deviceID: String) -> Int {
+        lock.lock()
+        let latched = latch.drain(deviceID: deviceID)
+        let removed = deviceVoices.removeValue(forKey: deviceID) ?? [:]
+        var releases: [(AVAudioUnitMIDIInstrument?, UInt8, UInt8, UInt8)] = []
+        var count = 0
+        for (key, var voice) in removed {
+            let other = deviceVoices.values.compactMap { $0[key] }
+            let otherNotes = other.flatMap { $0.notes.soundingNotes }
+            for channel in voice.pedalChannels where !other.contains(where: { $0.pedalChannels.contains(channel) }) {
+                releases.append((voice.target, 0xb0 | channel, 64, 0))
+            }
+            for note in voice.notes.drainAll() where !otherNotes.contains(where: { $0.note == note.note && $0.channel == note.channel }) {
+                releases.append((voice.target, 0x80 | note.channel, note.note, 0))
+                count += 1
+            }
+        }
+        if deviceID == "numa" { auxiliary[.numa]?.held.removeAll() }
+        if deviceID == "minilab" { auxiliary[.miniLab]?.held.removeAll() }
+        if deviceID == "keystage" { lastProgram = nil }
+        let notify = latchHandler
+        let engaged = latch.sustainedCount > 0
+        let sustaining = latch.sustainedCount
+        notifyHeldNotes()
+        lock.unlock()
+        for (target, status, data1, data2) in releases { target?.sendMIDIEvent(status, data1: data1, data2: data2) }
+        if !latched.isEmpty { notify?(engaged, sustaining) }
+        return count
+    }
+
     /// 顔つまみに割当済みの CC 番号（これだけを keyboard 経路から横取りする。
     /// 割当のない CC — Mod ホイール CC1 など — はそのまま楽器へ通す）
     private var knobCCs: Set<UInt8> = []
@@ -289,7 +347,7 @@ final class MIDIRouter: @unchecked Sendable {
 
 
     /// ノートのキープ（ダンパーペダル CC64。design/06 §8）
-    private var latch = NoteLatch()
+    private var latch = DeviceNoteLatches()
 
     /// ペダルの役割（mako 裁定 2026-08-03）。assign のときキープはせず、
     /// CC64 は普通の CC として扱う = 顔つまみに割り当てられる
@@ -359,11 +417,18 @@ final class MIDIRouter: @unchecked Sendable {
     // 「別々の二つの音源同時に弾きたい」）
 
     /// 鍵盤 2 の送り先（① は選択スロットと同じ。② で独立した席の選択を足す）
-    private var secondKeyboardTarget: AVAudioUnitMIDIInstrument?
+    enum AuxiliaryKeyboard: Hashable, Sendable { case numa, miniLab }
+    private struct AuxiliaryState {
+        var target: AVAudioUnitMIDIInstrument?
+        var held: Set<UInt16> = []
+        var ccs: Set<UInt8> = []
+        var handler: (@Sendable (UInt8, UInt8) -> Void)?
+    }
+    private var auxiliary: [AuxiliaryKeyboard: AuxiliaryState] = [:]
 
     /// 鍵盤 2 で押下中のノート（ch << 8 | note）。
     /// 送り先が替わるとき**旧スロットへ自分で消しに行く**ための帳簿
-    private var secondHeld: Set<UInt16> = []
+
 
     /// この受信を楽器へ通すか（純関数 — テスト対象）。
     ///
@@ -398,25 +463,24 @@ final class MIDIRouter: @unchecked Sendable {
     /// 鍵盤 2 が届く席の割当（ModWheel 116 / ダンパー 64 / スティック 74）と
     /// 駆動先。担当スロットが選択と割れても正しい割当を見るために keyboard の
     /// `knobCCs` とは別に持つ
-    private var secondKnobCCs: Set<UInt8> = []
-    private var secondKnobHandler: (@Sendable (UInt8, UInt8) -> Void)?
 
-    func setSecondKnobRouting(ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+
+    func setSecondKnobRouting(input: AuxiliaryKeyboard = .numa, ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
         lock.lock(); defer { lock.unlock() }
-        secondKnobCCs = ccs
-        secondKnobHandler = handler
+        auxiliary[input, default: AuxiliaryState()].ccs = ccs
+        auxiliary[input, default: AuxiliaryState()].handler = handler
     }
 
-    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?) {
+    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?, input: AuxiliaryKeyboard = .numa) {
         lock.lock()
-        guard unit !== secondKeyboardTarget else {
+        guard unit !== auxiliary[input]?.target else {
             lock.unlock()
             return
         }
-        let previous = secondKeyboardTarget
-        let orphaned = secondHeld
-        secondHeld = []
-        secondKeyboardTarget = unit
+        let previous = auxiliary[input]?.target
+        let orphaned = auxiliary[input]?.held ?? []
+        auxiliary[input, default: AuxiliaryState()].held = []
+        auxiliary[input, default: AuxiliaryState()].target = unit
         lock.unlock()
         // 宙に浮くノートは旧スロットへ自分で消しに行く（keyboard 経路と同じ作法）
         for key in orphaned {
@@ -424,26 +488,32 @@ final class MIDIRouter: @unchecked Sendable {
         }
     }
 
-    func routeSecondKeyboard(_ status: UInt8, _ rawData1: UInt8, _ data2: UInt8) {
+    func routeSecondKeyboard(_ status: UInt8, _ rawData1: UInt8, _ data2: UInt8, input: AuxiliaryKeyboard = .numa, deviceID: String? = nil) {
+        let deviceID = deviceID ?? (input == .numa ? "numa" : "minilab")
         // ⭐ まず内部モデルへ翻訳（CC1 → ModWheel 席）。以降は翻訳後の値だけを扱う
         let data1 = Self.secondKeyboardTranslated(status: status, data1: rawData1)
         lock.lock()
-        let target = secondKeyboardTarget
+        let state = auxiliary[input] ?? AuxiliaryState()
+        let target = state.target
         let trace = traceHandler
-        let handler = secondKnobHandler
-        let captured = status & 0xF0 == 0xB0 && secondKnobCCs.contains(data1)
+        let handler = state.handler
+        let captured = status & 0xF0 == 0xB0 && state.ccs.contains(data1)
         let forwards = Self.secondKeyboardForwards(status: status, data1: data1)
         if forwards, !captured {
             let key = UInt16(status & 0x0F) << 8 | UInt16(data1)
             switch status & 0xF0 {
-            case 0x90 where data2 > 0: secondHeld.insert(key)
-            case 0x80, 0x90: secondHeld.remove(key)
+            case 0x90 where data2 > 0: auxiliary[input, default: AuxiliaryState()].held.insert(key)
+            case 0x80, 0x90: auxiliary[input, default: AuxiliaryState()].held.remove(key)
             default: break
             }
         }
         lock.unlock()
         // trace は翻訳後（ログに CC116 = ModWheel と出る — 席の言葉で読める）
-        trace?(.secondKeyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        if input == .miniLab {
+            trace?(.miniLab(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        } else {
+            trace?(.secondKeyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
+        }
         // ⭐ ModWheel 席などに割当があれば内部モデル操作（= パラメータ駆動）へ。
         // 割当は**担当スロットのもの**（`secondKnobCCs` — 選択と割れても正しい席）
         if captured, let handler {
@@ -451,7 +521,29 @@ final class MIDIRouter: @unchecked Sendable {
             return
         }
         guard forwards else { return }
-        target?.sendMIDIEvent(status, data1: data1, data2: data2)
+        sendDevice(deviceID, target: target, status: status, data1: data1, data2: data2)
+    }
+
+    // MARK: - 操作面（nanoKONTROL2）経路
+
+    /// 操作面の CC の受け口（main へホップするのは受け手の仕事）
+    private var surfaceHandler: (@Sendable (UInt8, UInt8) -> Void)?
+
+    func setSurfaceHandler(_ handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        surfaceHandler = handler
+    }
+
+    /// 操作面の受信。**CC だけを受け、楽器へは何も流さない** — 意味は机で
+    /// 載せた部品が決める（`SurfaceMapping`）
+    func routeSurface(_ status: UInt8, _ data1: UInt8, _ data2: UInt8) {
+        guard status & 0xF0 == 0xB0 else { return }
+        lock.lock()
+        let handler = surfaceHandler
+        let trace = traceHandler
+        lock.unlock()
+        trace?(.surface(cc: data1, value: data2))
+        handler?(data1, data2)
     }
 
     /// キープ状態の通知先（GUI 表示用。起動時に一度）
@@ -542,13 +634,53 @@ final class MIDIRouter: @unchecked Sendable {
         drumKnobHandler = handler
     }
 
+    /// LPD8 ノブ → **選択 Track の顔つまみ**（`Lpd8KnobJack.face`）。空なら
+    /// drums 側（従来）。両方に居る CC は顔つまみが先
+    private var lpd8FaceCCs: Set<UInt8> = []
+    private var lpd8FaceHandler: (@Sendable (UInt8, UInt8) -> Void)?
+
+    func setLpd8FaceRouting(ccs: Set<UInt8>, handler: (@Sendable (UInt8, UInt8) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        lpd8FaceCCs = ccs
+        lpd8FaceHandler = handler
+    }
+
     /// ルーティングトレースの受け口を設定する（起動時に一度）
     func setTraceHandler(_ handler: (@Sendable (MidiRoute) -> Void)?) {
         lock.lock(); defer { lock.unlock() }
         traceHandler = handler
     }
 
-    func routeKeyboard(_ status: UInt8, _ data1: UInt8, _ data2: UInt8) {
+    /// keyboard 経路に届いた MIDI の出どころ。**演奏の帳簿（latch / 和音）は
+    /// 共有**しつつ、Keystage 専用の解釈を汎用鍵盤に当てないための印
+    /// （mako 裁定 2026-09-26「スタジオの MIDI 鍵盤を Keystage の代わりに」）
+    enum KeyboardOrigin: Sendable {
+        /// Keystage（と PC キーボード演奏）— 帯の飲み込み / PC ナビ / 焼きボタン
+        case keystage
+        /// 名前の分からない鍵盤 — 鍵盤 2 と同じ通行証（ノート・AT・ベンド・
+        /// CC64/74、CC1 → ModWheel 席）。それ以外の CC / PC は黙って落とす
+        case generic
+    }
+
+    /// 汎用鍵盤の通行証（純関数 — テスト対象）。鍵盤 2 と同じ列 + CC120
+    /// （All Sound Off = panic。どの鍵盤の EXIT でも止まるべき）
+    static func genericKeyboardForwards(status: UInt8, data1: UInt8) -> Bool {
+        secondKeyboardForwards(status: status, data1: data1)
+            || (status & 0xF0 == 0xB0 && data1 == 120)
+    }
+
+    func routeKeyboard(
+        _ status: UInt8, _ rawData1: UInt8, _ rawData2: UInt8, origin: KeyboardOrigin = .keystage, deviceID: String = "local"
+    ) {
+        // ⭐ 汎用鍵盤はまず翻訳（CC1 → ModWheel 席。鍵盤 2 と同じアダプタ）、
+        // 通行証の無いものはここで落とす — Keystage 専用の解釈（帯 / PC / 焼き
+        // ボタン / ch16）に届かせない。⚠️ trace も出さない（落とす量が多く、
+        // Debug ログを埋める）
+        let data1 =
+            origin == .generic ? Self.secondKeyboardTranslated(status: status, data1: rawData1) : rawData1
+        if origin == .generic, !Self.genericKeyboardForwards(status: status, data1: data1) {
+            return
+        }
         lock.lock()
         // ダンパーの極性を**入口で**直す（mako 報告 2026-08-14「キープが逆」—
         // ペダルには踏むと閉じる/開くの 2 種があり、逆極性の個体は踏んで
@@ -556,7 +688,7 @@ final class MIDIRouter: @unchecked Sendable {
         // ネイティブ sustain も assign モードの割当も全部同じ向きになる）
         let data2 =
             (status & 0xF0 == 0xB0 && data1 == UInt8(FaceKnobAssignment.damperCC)
-                && pedalInverted) ? 127 - data2 : data2
+                && pedalInverted) ? 127 - rawData2 : rawData2
         let trace = traceHandler
 
         // 🧪 **ボタン類の受信を人が読める形で出す**（mako 要望 2026-08-05
@@ -564,7 +696,7 @@ final class MIDIRouter: @unchecked Sendable {
         // ノート（0x8n/0x9n/0xAn）とノブの値ストリーム（ch15 の CC0-63）は除く
         let isNote = status & 0xF0 == 0x80 || status & 0xF0 == 0x90 || status & 0xF0 == 0xA0
         let isKnobStream = status == 0xBE && data1 < 64
-        if !isNote, !isKnobStream {
+        if !isNote, !isKnobStream, origin == .keystage {
             NSLog("keystage: [受信] %@", Self.describe(status, data1, data2))
         }
 
@@ -600,9 +732,9 @@ final class MIDIRouter: @unchecked Sendable {
         // assign モードでは CC64 を特別扱いしない — 下の顔つまみ経路が
         // 拾う（割当があれば横取り、無ければ楽器へ素通しでネイティブ sustain）
         if status & 0xF0 == 0xB0, data1 == 64, pedalMode == .keep {
-            let wasEngaged = latch.isEngaged
-            let released = latch.pedal(data2)
-            let engaged = latch.isEngaged
+            let wasEngaged = latch.isEngaged(deviceID: deviceID)
+            let released = latch.pedal(data2, deviceID: deviceID)
+            let engaged = latch.isEngaged(deviceID: deviceID)
             let sustaining = latch.sustainedCount
             let target = keyboardTarget
             let notify = latchHandler
@@ -610,7 +742,7 @@ final class MIDIRouter: @unchecked Sendable {
 
             // 溜めた音を先に消してから、ペダル自体を楽器へ渡す
             for note in released {
-                target?.sendMIDIEvent(0x80 | (note.channel & 0x0F), data1: note.note, data2: 0)
+                sendDevice(deviceID, target: target, status: 0x80 | (note.channel & 0x0F), data1: note.note, data2: 0)
             }
             if wasEngaged != engaged {
                 trace?(.latch(engaged: engaged, released: released.count))
@@ -620,17 +752,17 @@ final class MIDIRouter: @unchecked Sendable {
             // CC64 は飲み込まない — プラグインのネイティブなサスティンも効かせる
             trace?(
                 .keyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
-            target?.sendMIDIEvent(status, data1: data1, data2: data2)
+            sendDevice(deviceID, target: target, status: status, data1: data1, data2: data2)
             return
         }
 
         // ノートの押下記録（キープの帳簿）
         if status & 0xF0 == 0x90, data2 > 0 {
-            latch.noteOn(data1, channel: status & 0x0F)
+            latch.noteOn(data1, channel: status & 0x0F, deviceID: deviceID)
             notifyHeldNotes()
         } else if status & 0xF0 == 0x80 || (status & 0xF0 == 0x90 && data2 == 0) {
             defer { notifyHeldNotes() }
-            if !latch.shouldSendNoteOff(data1) {
+            if !latch.shouldSendNoteOff(data1, deviceID: deviceID) {
                 // キープ中 — 楽器へは流さない（鳴らし続ける）
                 let sustaining = latch.sustainedCount
                 let notify = latchHandler
@@ -825,7 +957,7 @@ final class MIDIRouter: @unchecked Sendable {
         } else {
             trace?(.keyboard(status: status, data1: data1, data2: data2, hasTarget: target != nil))
         }
-        target?.sendMIDIEvent(status, data1: data1, data2: data2)
+        sendDevice(deviceID, target: target, status: status, data1: data1, data2: data2)
     }
 
     /// 受信を人が読める形にする（ログ用）。
@@ -889,7 +1021,7 @@ final class MIDIRouter: @unchecked Sendable {
         return nil
     }
 
-    func routeDrums(_ status: UInt8, _ data1: UInt8, _ data2: UInt8) {
+    func routeDrums(_ status: UInt8, _ data1: UInt8, _ data2: UInt8, deviceID: String = "lpd8") {
         lock.lock()
         let trace = traceHandler
         // **PROG 4 のパッドは音を出さず、プラグイン選択に使う**。
@@ -926,6 +1058,15 @@ final class MIDIRouter: @unchecked Sendable {
             lock.unlock()
             return
         }
+        // LPD8 ノブ CC → 顔つまみ Jack（`Lpd8KnobJack.face`。割当の有無に
+        // 関わらず飲む — ドラム音源へ漏らさない）
+        if status & 0xF0 == 0xB0, lpd8FaceCCs.contains(data1) {
+            let handler = lpd8FaceHandler
+            lock.unlock()
+            trace?(.lpd8FaceKnob(cc: data1, value: data2))
+            handler?(data1, data2)
+            return
+        }
         // LPD8 ノブ CC → ドラム顔つまみ（keyboard 側と同じ割当ベース横取り）
         if status & 0xF0 == 0xB0, drumKnobCCs.contains(data1), let handler = drumKnobHandler {
             lock.unlock()
@@ -936,136 +1077,192 @@ final class MIDIRouter: @unchecked Sendable {
         let target = drumsTarget
         lock.unlock()
         trace?(.drums(status: status, data1: data1, data2: data2, hasTarget: target != nil))
-        target?.sendMIDIEvent(status, data1: data1, data2: data2)
+        sendDevice(deviceID, target: target, status: status, data1: data1, data2: data2)
     }
 }
 
-/// CoreMIDI クライアント。ソースを名前で識別して 2 経路に接続する
+/// ソースが刺さる経路（接続表の答え。spec/09 Jack の「機材セクション → Jack」）
+enum MIDISourceRoute: Equatable, Sendable {
+    /// Keystage（KBD/CTRL と DAW IN の 2 本）→ keyboard 経路
+    case keystage
+    /// 名前の分からない鍵盤 → keyboard 経路（`KeyboardOrigin.generic`）
+    case genericKeyboard
+    /// LPD8 → drums 経路
+    case drums
+    /// NCXse / （Keystage が居るときの）汎用鍵盤 → 鍵盤 2 経路
+    case secondKeyboard
+    case miniLab
+    /// 操作面（nanoKONTROL2）→ surface 経路。CC の意味は**机で載せた部品**が
+    /// 決める（`SurfaceMapping`。mako 2026-10-04「ナノコントロール 2 の上に
+    /// ミキサーを置く」）。鍵盤扱いしない — フェーダーの CC0-7 は Keystage の席と
+    /// 同じ番号なので、経路ごと分ける
+    case surface
+    case xtouch
+}
+
+/// 繋いだソース（Jack 結線図の表示用）
+struct MIDIConnectedSource: Equatable, Sendable {
+    let name: String
+    let route: MIDISourceRoute
+}
+
+/// CoreMIDI クライアント。ソースを名前で識別して 3 経路に接続する
 final class MIDIInput {
     private var client = MIDIClientRef()
-    private var keyboardPort = MIDIPortRef()
-    private var drumsPort = MIDIPortRef()
-    /// 鍵盤 2（NCXse）の受信ポート（2nd キーボード計画 ①）
-    private var secondKeyboardPort = MIDIPortRef()
     let router: MIDIRouter
-
-    /// Keystage のソースに振った番号（refCon で持たせる。Clock の集計に出る）
-    private var keystageSourceCount = 0
-
-    /// 接続済みソースの表示名（UI 表示用）
+    private let access: NativeAccess
+    private struct Connection {
+        let port: MIDIPortRef
+        let source: MIDIEndpointRef
+        let route: MIDISourceRoute
+        let deviceID: String
+        let gate: MIDIWorkGate
+    }
+    private var connections: [String: Connection] = [:]
+    private var deviceIDs: [String: String] = [:]
+    private var sourceSequence = 0
     private(set) var connectedSources: [String] = []
-
-    /// セットアップ変更（挿抜）の通知先（メインスレッドで呼ばれる。LedBus の再接続用）
+    private(set) var connected: [MIDIConnectedSource] = []
     var onSetupChanged: (() -> Void)?
-
-    /// LPD8 からの SysEx（GET 応答など）の中継。ハンドラはメインキューで呼ばれる
+    var onXTouch: (@MainActor (UInt8, UInt8, UInt8) -> Void)?
     let sysexRelay = SysExRelay()
 
-
-    init(router: MIDIRouter) {
+    init(router: MIDIRouter, access: NativeAccess) {
         self.router = router
+        self.access = access
     }
-
     func start() throws {
-        let routerRef = router
-
-        var status = MIDIClientCreateWithBlock("ladyland" as CFString, &client) { [weak self] notification in
-            // ホットプラグ: セットアップ変更で再接続（design/06 §5-4 由来の原則）
+        let status = MIDIClientCreateWithBlock("ladyland" as CFString, &client) { [weak self] notification in
             if notification.pointee.messageID == .msgSetupChanged {
-                DispatchQueue.main.async {
-                    self?.connectSources()
-                    self?.onSetupChanged?()
-                }
+                DispatchQueue.main.async { self?.connectSources(); self?.onSetupChanged?() }
             }
         }
         guard status == noErr else { throw MIDIError.clientCreate(status) }
-
-        status = MIDIInputPortCreateWithProtocol(
-            client, "keyboard" as CFString, ._1_0, &keyboardPort
-        ) { eventList, srcConnRefCon in
-            // **どのエンドポイントから来たか**を refCon で受ける（接続時に
-            // 1-based の番号を渡してある）。渡さないと 2 本の Keystage が
-            // 混ざっても区別できず、BPM が 2 倍に読めているのに気づけない
-            let source = Int(bitPattern: srcConnRefCon)
-            Self.handle(
-                eventList, route: { routerRef.routeKeyboard($0, $1, $2) },
-                word: { word in
-                    // MessageType 1 = System Real Time。status 0xF8 = MIDI Clock。
-                    // **ここでしか拾えない** — MT2 のフィルタを通らないため
-                    guard (word >> 28) & 0xF == 1, (word >> 16) & 0xFF == 0xF8 else { return }
-                    routerRef.receiveClockTick(source: source)
-                })
-        }
-        guard status == noErr else { throw MIDIError.portCreate(status) }
-
-        // drums ポートだけ SysEx も拾う（LPD8 の GET 応答。design/06 §8）。
-        // assembler はこのクロージャに閉じ込める — CoreMIDI はポート毎に
-        // コールバックを直列化するため、ロックなしで安全
-        let relay = sysexRelay
-        var drumsAssembler = SysEx7Assembler()
-        status = MIDIInputPortCreateWithProtocol(client, "drums" as CFString, ._1_0, &drumsPort) { eventList, _ in
-            Self.handle(eventList, route: { routerRef.routeDrums($0, $1, $2) }, word: { word in
-                if let frame = drumsAssembler.feed(word) {
-                    relay.emit(frame)
-                }
-            })
-        }
-        guard status == noErr else { throw MIDIError.portCreate(status) }
-
-        // 鍵盤 2（NCXse）— keyboard とは**別ポート**。⚠️ 同じ CC 番号でも
-        // 面が違えば意味が違う（NCXse の CC0/32/7 は Bank Select / 音量で
-        // あって Keystage の席ではない。実測 2026-08-10）ので、経路ごと分ける
-        status = MIDIInputPortCreateWithProtocol(
-            client, "secondKeyboard" as CFString, ._1_0, &secondKeyboardPort
-        ) { eventList, _ in
-            Self.handle(eventList, route: { routerRef.routeSecondKeyboard($0, $1, $2) })
-        }
-        guard status == noErr else { throw MIDIError.portCreate(status) }
-
         connectSources()
     }
+    func updateDevices(_ snapshot: MidistageClient.Snapshot) {
+        deviceIDs = Dictionary(uniqueKeysWithValues: snapshot.devices.filter(snapshot.owns).flatMap { device in
+            device.nativeInputs.map { ($0, device.deviceID) }
+        })
+        connectSources()
+    }
+    func refresh() { connectSources() }
+    deinit {
+        for connection in connections.values { connection.gate.revoke(); MIDIPortDispose(connection.port) }
+        if client != 0 { MIDIClientDispose(client) }
+    }
 
-    /// ソースを列挙し、名前で経路に接続する
-    private func connectSources() {
-        connectedSources = []
-        keystageSourceCount = 0
-        // 繋ぎ直したら測り直す — 呼ばないと抜いても最後の BPM が残る
-        router.resetClock()
-        for i in 0..<MIDIGetNumberOfSources() {
-            let source = MIDIGetSource(i)
-            let name = Self.displayName(of: source) ?? "(unknown)"
+    /// 名前 1 つの結線先（純関数 — テスト対象）。nil = 繋がない。
+    ///
+    /// ⭐ **未知の鍵盤は捨てない**（mako 裁定 2026-09-26「スタジオにある MIDI
+    /// 鍵盤を Keystage の代わりに」）: Keystage 不在ならシンセ入力 1（keyboard
+    /// 経路、汎用の通行証）、居れば鍵盤 2。ROTO（`RotoService` が自前で繋ぐ）と
+    /// 仮想ポート（IAC / Network）は鍵盤ではないので繋がない
+    static func route(forSourceName name: String, hasKeystage: Bool) -> MIDISourceRoute? {
+        if name.contains("Keystage") { return .keystage }
+        if name.contains("LPD8") { return .drums }
+        if name.contains("nanoKONTROL") { return .surface }
+        if name.lowercased().contains("x-touch") {
+            return name.hasSuffix("X-Touch INT") ? .xtouch : nil
+        }
+        // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
+        // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
+        // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
+        // 全 25 鍵の健全性は実測済み（2026-08-22 スニファ 2 周 —
+        // 「鍵盤 2 つ壊れてそう」は配線されていなかっただけ）
+        if name.contains("MiniLab") { return .miniLab }
+        if name.contains("NCXse") {
+            // ⚠️ `-controller` は**意図的に繋がない** — スティックとベンドが
+            // ch1/ch2 へ複製されて二重に届くうえ、音量ノブ（CC7）と掃除
+            // バースト（CC121/123）の発生源（実測 2026-08-10）。
+            // 演奏に要るものは全部 `-keyboard` 側に揃っている
+            return name.contains("keyboard") ? .secondKeyboard : nil
+        }
+        let lowered = name.lowercased()
+        if lowered.contains("roto") || lowered.contains("iac") || lowered.contains("network") {
+            return nil
+        }
+        return hasKeystage ? .secondKeyboard : .genericKeyboard
+    }
 
-            // Keystage は KBD/CTRL の 2 ポートを持つ。P1 は両方 keyboard 経路
-            // （ノブ CC の顔つまみ割当は P4 で CTRL を分離）
-            if name.contains("Keystage") {
-                // **1-based の番号を refCon で持たせる**（0 は「不明」に使う）。
-                // Clock の集計にこの番号が出るので、下のログと突き合わせれば
-                // どのエンドポイントが送っているか分かる
-                keystageSourceCount += 1
-                let marker = UnsafeMutableRawPointer(bitPattern: keystageSourceCount)
-                MIDIPortConnectSource(keyboardPort, source, marker)
-                connectedSources.append("\(name) → keyboard(src#\(keystageSourceCount))")
-            } else if name.contains("LPD8") {
-                MIDIPortConnectSource(drumsPort, source, nil)
-                connectedSources.append("\(name) → drums")
-            } else if name.contains("MiniLab") {
-                // Arturia MiniLab mkII = **鍵盤 2**（mako 裁定 2026-08-22
-                // 「NCXse と同じで、別の楽器にしたい」）。担当はタイル右クリック
-                // 「鍵盤 2 をこの席に固定」（nil = 選択に追従）。
-                // 全 25 鍵の健全性は実測済み（2026-08-22 スニファ 2 周 —
-                // 「鍵盤 2 つ壊れてそう」は配線されていなかっただけ）
-                MIDIPortConnectSource(secondKeyboardPort, source, nil)
-                connectedSources.append("\(name) → 鍵盤2")
-            } else if name.contains("NCXse"), name.contains("keyboard") {
-                // ⚠️ `-controller` は**意図的に繋がない** — スティックとベンドが
-                // ch1/ch2 へ複製されて二重に届くうえ、音量ノブ（CC7）と掃除
-                // バースト（CC121/123）の発生源（実測 2026-08-10）。
-                // 演奏に要るものは全部 `-keyboard` 側に揃っている
-                MIDIPortConnectSource(secondKeyboardPort, source, nil)
-                connectedSources.append("\(name) → 鍵盤2")
+    /// 名前の一覧 → 結線（Keystage の有無は一覧全体で決める）
+    static func plan(sourceNames: [String], allowedSourceNames: Set<String>? = nil) -> [MIDIConnectedSource] {
+        let sourceNames = sourceNames.filter { allowedSourceNames?.contains($0) ?? true }
+        let hasKeystage = sourceNames.contains { $0.contains("Keystage") }
+        return sourceNames.compactMap { name in
+            route(forSourceName: name, hasKeystage: hasKeystage).map {
+                MIDIConnectedSource(name: name, route: $0)
             }
         }
-        NSLog("MIDI sources: %@", connectedSources.isEmpty ? "(none)" : connectedSources.joined(separator: ", "))
+    }
+
+    /// 所有中の仮想ポートだけを差分接続する。他の機材は繋ぎ直さない。
+    private func connectSources() {
+        guard client != 0 else { return }
+        let sources = (0..<MIDIGetNumberOfSources()).map { MIDIGetSource($0) }
+        let names = sources.map { Self.displayName(of: $0) ?? "(unknown)" }
+        let allowed = Set(names.filter { access.allowsInput($0) && deviceIDs[$0] != nil })
+        let planned = Self.plan(sourceNames: names, allowedSourceNames: allowed)
+        for (name, connection) in connections {
+            if !planned.contains(where: { $0.name == name && $0.route == connection.route }) {
+                connection.gate.revoke()
+                // callback と同じ gate の内側で、接続先変更の音も整理する。
+                access.withInput(name) { router.releaseDevice(connection.deviceID) }
+                MIDIPortDisconnectSource(connection.port, connection.source)
+                MIDIPortDispose(connection.port)
+                connections.removeValue(forKey: name)
+                if connection.route == .keystage { router.resetClock() }
+            }
+        }
+        for (source, name) in zip(sources, names) {
+            guard connections[name] == nil, let entry = planned.first(where: { $0.name == name }),
+                  let deviceID = deviceIDs[name] else { continue }
+            let gate = MIDIWorkGate()
+            gate.activate()
+            let stamp = gate.stamp!
+            var port = MIDIPortRef()
+            var assembler = SysEx7Assembler()
+            sourceSequence += 1
+            let sourceID = sourceSequence
+            let router = router, access = access, relay = sysexRelay
+            let xtouch = onXTouch
+            let status = MIDIInputPortCreateWithProtocol(client, name as CFString, ._1_0, &port) { eventList, _ in
+                access.withInput(name) {
+                    guard let work = gate.begin(stamp) else { return }
+                    defer { work.finish() }
+                    switch entry.route {
+                    case .keystage, .genericKeyboard:
+                        Self.handle(eventList, route: {
+                            router.routeKeyboard($0, $1, $2, origin: entry.route == .keystage ? .keystage : .generic, deviceID: deviceID)
+                        }, word: { word in
+                            if (word >> 28) & 0xf == 1, (word >> 16) & 0xff == 0xf8 { router.receiveClockTick(source: sourceID) }
+                        })
+                    case .drums:
+                        Self.handle(eventList, route: { router.routeDrums($0, $1, $2, deviceID: deviceID) }, word: { word in
+                            if let frame = assembler.feed(word) {
+                                relay.emit(frame, accepting: { access.allowsInput(name) && gate.stamp == stamp })
+                            }
+                        })
+                    case .secondKeyboard, .miniLab:
+                        Self.handle(eventList, route: { router.routeSecondKeyboard($0, $1, $2, input: entry.route == .miniLab ? .miniLab : .numa, deviceID: deviceID) })
+                    case .xtouch:
+                        Self.handle(eventList, route: { status, data1, data2 in
+                            DispatchQueue.main.async {
+                                guard access.allowsInput(name), gate.stamp == stamp else { return }
+                                xtouch?(status, data1, data2)
+                            }
+                        })
+                    case .surface:
+                        Self.handle(eventList, route: { router.routeSurface($0, $1, $2) })
+                    }
+                }
+            }
+            guard status == noErr else { continue }
+            guard MIDIPortConnectSource(port, source, nil) == noErr else { MIDIPortDispose(port); continue }
+            connections[name] = Connection(port: port, source: source, route: entry.route, deviceID: deviceID, gate: gate)
+        }
+        connected = planned.filter { connections[$0.name] != nil }
+        connectedSources = connected.map(\.name)
     }
 
     /// UMP イベントリストから MIDI 1.0 チャンネルボイスを取り出す。
@@ -1116,11 +1313,11 @@ final class SysExRelay: @unchecked Sendable {
         self.handler = handler
     }
 
-    func emit(_ frame: [UInt8]) {
+    func emit(_ frame: [UInt8], accepting: @escaping @Sendable () -> Bool = { true }) {
         lock.lock()
         let handler = handler
         lock.unlock()
         guard let handler else { return }
-        DispatchQueue.main.async { handler(frame) }
+        DispatchQueue.main.async { if accepting() { handler(frame) } }
     }
 }

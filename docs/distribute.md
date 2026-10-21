@@ -1,6 +1,6 @@
 # Ladyland を他の Mac へ配る
 
-> 対象: **Apple Silicon (arm64) / macOS 14 以降**（mako 裁定 2026-08-02 で Intel は対象外）
+> 対象: **Apple Silicon (arm64) / macOS 15 以降**（mako 裁定 2026-08-02 で Intel は対象外。2026-10-04 に 3D の机のため 14 → 15）
 
 ## 配る側の手順
 

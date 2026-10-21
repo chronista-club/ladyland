@@ -22,3 +22,6 @@ tracing = { workspace = true }
 # Video encoding (optional, requires FFmpeg)
 video-rs = { workspace = true, optional = true }
 ndarray = { workspace = true, optional = true }
+
+[dev-dependencies]
+pollster = "0.4"

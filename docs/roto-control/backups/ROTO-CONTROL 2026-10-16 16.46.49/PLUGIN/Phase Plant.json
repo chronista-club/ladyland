@@ -1,0 +1,41 @@
+{
+    "version": 1,
+    "type": "PLUGIN",
+    "name": "Phase Plant",
+    "hash": "290a3e1d09597d01",
+    "knobs": [
+        {
+            "controlIndex": 0,
+            "mappedParam": 4,
+            "paramHash": "270c61222567",
+            "macroParam": false,
+            "minValue": 0,
+            "maxValue": 16383,
+            "controlName": "Lane 3 > Gai",
+            "colorScheme": 64,
+            "hapticMode": 0,
+            "hapticIndent1": 255,
+            "hapticIndent2": 255,
+            "hapticSteps": 0,
+            "stepNames": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+            ]
+        }
+    ],
+    "buttons": []
+}

@@ -50,7 +50,7 @@ mod ffmpeg_impl {
     impl VideoEncoderInner {
         pub fn new(config: EncoderConfig) -> Self {
             init_video_rs();
-            let frame_duration = Time::from_nth_of_a_second(config.fps as u64);
+            let frame_duration = Time::from_nth_of_a_second(config.fps as usize);
 
             Self {
                 config,
@@ -65,11 +65,11 @@ mod ffmpeg_impl {
         fn create_settings(&self) -> Settings {
             let settings = match self.config.codec {
                 VideoCodec::H264 => {
-                    Settings::preset_h264_yuv420p(self.config.width, self.config.height, false)
+                    Settings::preset_h264_yuv420p(self.config.width as usize, self.config.height as usize, false)
                 }
                 VideoCodec::H265 | VideoCodec::VP9 => {
                     tracing::warn!("Codec not directly supported, using H.264");
-                    Settings::preset_h264_yuv420p(self.config.width, self.config.height, false)
+                    Settings::preset_h264_yuv420p(self.config.width as usize, self.config.height as usize, false)
                 }
             };
 
@@ -120,15 +120,15 @@ mod ffmpeg_impl {
                 return Err(WaveError::Encode("Encoder not started".into()));
             }
 
-            let encoder = self
-                .encoder
-                .as_mut()
-                .ok_or_else(|| WaveError::Encode("Encoder not initialized".into()))?;
-
             let width = self.config.width as usize;
             let height = self.config.height as usize;
 
             let rgb_frame = self.rgba_to_rgb_array(rgba_buffer, width, height)?;
+
+            let encoder = self
+                .encoder
+                .as_mut()
+                .ok_or_else(|| WaveError::Encode("Encoder not initialized".into()))?;
 
             encoder
                 .encode(&rgb_frame, self.current_position)
@@ -172,7 +172,7 @@ mod ffmpeg_impl {
                 return Ok(());
             }
 
-            if let Some(encoder) = self.encoder.take() {
+            if let Some(mut encoder) = self.encoder.take() {
                 encoder
                     .finish()
                     .map_err(|e| WaveError::Encode(format!("Failed to finish encoder: {}", e)))?;
@@ -371,5 +371,46 @@ mod tests {
         // This will be true if compiled with --features ffmpeg
         let enabled = VideoEncoder::is_ffmpeg_enabled();
         println!("FFmpeg support: {}", enabled);
+    }
+
+    #[cfg(feature = "ffmpeg")]
+    #[test]
+    fn records_rgba_frames_to_decodable_mp4() {
+        let path = std::env::temp_dir().join(format!("cortex-encoder-{}.mp4", std::process::id()));
+        let mut encoder = VideoEncoder::new(EncoderConfig {
+            width: 16,
+            height: 16,
+            fps: 30,
+            ..Default::default()
+        });
+        assert!(encoder.encode_frame(&[]).is_err());
+        encoder.start_recording(&path).unwrap();
+        assert!(encoder.encode_frame(&[0; 4]).is_err());
+        assert_eq!(encoder.frame_count(), 0);
+        let rgba = [255, 0, 0, 255].repeat(16 * 16);
+        for _ in 0..3 {
+            encoder.encode_frame(&rgba).unwrap();
+        }
+        encoder.stop_recording().unwrap();
+        assert!(!encoder.is_recording());
+        assert_eq!(encoder.frame_count(), 3);
+        assert!((encoder.elapsed_seconds() - 0.1).abs() < f64::EPSILON);
+
+        // ⚠️ 既知（上流 video-rs 0.12.0 + FFmpeg 9、2026-10-17 実測）: 読み戻せるのは
+        // **書いた数 - 1**。video-rs は最後のパケットに長さを付けないので、MP4 の最後の
+        // サンプルが長さ 0 になり捨てられる（ffprobe でも nb_frames=3 / 読めるのは 2）。
+        // B フレームを切っても `use_editlist=0` でも変わらなかった。上流で直ったら
+        // この数が 3 に戻ってテストが落ちる — そのとき 3 に直す
+        let mut decoder = video_rs::decode::Decoder::new(path.as_path()).unwrap();
+        assert_eq!(decoder.size(), (16, 16));
+        for _ in 0..2 {
+            let (_, frame) = decoder.decode().unwrap();
+            assert_eq!(frame.shape(), &[16, 16, 3]);
+            assert!(frame[[0, 0, 0]] > 200);
+            assert!(frame[[0, 0, 1]] < 30);
+        }
+        assert!(decoder.decode().is_err());
+        drop(decoder);
+        std::fs::remove_file(path).unwrap();
     }
 }

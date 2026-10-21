@@ -138,7 +138,7 @@ cp "$FIELDD" "$CONTENTS/Resources/fieldd"
 
 echo "==> AppIcon を生成"
 ICONSET="$(mktemp -d)/Ladyland.iconset"
-swift "$REPO_ROOT/scripts/make-appicon.swift" "$ICONSET" >/dev/null
+swift "$REPO_ROOT/scripts/make-appicon.swift" "$ICONSET" "$REPO_ROOT/assets/brand/source.svg" >/dev/null
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
@@ -155,7 +155,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>${SHORT_VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD_VERSION}</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>

@@ -42,9 +42,11 @@ struct LlDataSnapshot {
         var pedalInverted: Bool? = nil
         var synthInput1Slot: Int? = nil
         var secondKeyboardSlot: Int? = nil
+        var miniLabSlot: Int? = nil
         var keystage: String? = nil
         var rotoColors: String? = nil
         var tempoSync: Bool? = nil
+        var lpd8KnobJack: String? = nil
     }
 
     var globals = Globals()
@@ -105,11 +107,17 @@ struct LlDataSnapshot {
         if let value = snapshot.secondKeyboardSlot {
             rack.children.append(KDLNode(name: "secondKeyboard", props: ["slot": .int(value)]))
         }
+        if let value = snapshot.miniLabSlot {
+            rack.children.append(KDLNode(name: "miniLab", props: ["slot": .int(value)]))
+        }
         if let value = snapshot.keystage {
             rack.children.append(KDLNode(name: "keystage", props: ["json": .string(value)]))
         }
         if let value = snapshot.rotoColors {
             rack.children.append(KDLNode(name: "rotoColors", props: ["json": .string(value)]))
+        }
+        if let value = snapshot.lpd8KnobJack {
+            rack.children.append(KDLNode(name: "lpd8Knobs", props: ["jack": .string(value)]))
         }
         if let value = snapshot.tempoSync {
             rack.children.append(KDLNode(name: "tempoSync", props: ["enabled": .bool(value)]))
@@ -237,7 +245,7 @@ struct LlDataSnapshot {
                 ]),
             KDLNode(
                 name: "node", args: [.string("knob")],
-                props: ["doc": .string("顔つまみ割当（cc = Ctrl 番号 0-127 / 128 = PB）")]),
+                props: ["doc": .string("Track ノブの割当（cc = Ctrl 番号 0-127 / 128 = PB）")]),
             KDLNode(
                 name: "node", args: [.string("draft")],
                 props: ["doc": .string("席の棚の 1 着（工房と舞台の分離。design/06 §8）")]),
@@ -299,9 +307,11 @@ struct LlDataSnapshot {
                 pedalInverted: rack.child(named: "pedalInverted")?["value"]?.boolValue,
                 synthInput1Slot: rack.child(named: "synthInput1")?["slot"]?.intValue,
                 secondKeyboardSlot: rack.child(named: "secondKeyboard")?["slot"]?.intValue,
+                miniLabSlot: rack.child(named: "miniLab")?["slot"]?.intValue,
                 keystage: rack.child(named: "keystage")?["json"]?.stringValue,
                 rotoColors: rack.child(named: "rotoColors")?["json"]?.stringValue,
-                tempoSync: rack.child(named: "tempoSync")?["enabled"]?.boolValue)
+                tempoSync: rack.child(named: "tempoSync")?["enabled"]?.boolValue,
+                lpd8KnobJack: rack.child(named: "lpd8Knobs")?["jack"]?.stringValue)
             if let stamp = rack["exportedAt"]?.stringValue,
                let date = timestampFormatter.date(from: stamp)
             {
@@ -389,9 +399,11 @@ struct LlDataSnapshot {
             snapshot.pedalInverted = globals.pedalInverted
             snapshot.synthInput1Slot = globals.synthInput1Slot
             snapshot.secondKeyboardSlot = globals.secondKeyboardSlot
+            snapshot.miniLabSlot = globals.miniLabSlot
             snapshot.keystage = globals.keystage
             snapshot.rotoColors = globals.rotoColors
             snapshot.tempoSync = globals.tempoSync
+            snapshot.lpd8KnobJack = globals.lpd8KnobJack
         }
         return snapshot
     }

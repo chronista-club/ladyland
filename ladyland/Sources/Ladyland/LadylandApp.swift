@@ -8,7 +8,27 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var prepareForTermination: (() async -> Void)?
+    var replyToTermination: (NSApplication, Bool) -> Void = { $0.reply(toApplicationShouldTerminate: $1) }
+    private var terminationTask: Task<Void, Never>?
+    private var readyToTerminate = false
+
+    /// QUICを明示的に閉じてから終了する。次の起動を旧sessionのtimeout待ちにしない。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if readyToTerminate { return .terminateNow }
+        if terminationTask == nil {
+            terminationTask = Task { [weak self] in
+                guard let self else { return }
+                await prepareForTermination?()
+                readyToTerminate = true
+                replyToTermination(sender, true)
+            }
+        }
+        return .terminateLater
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -32,6 +52,9 @@ struct LadylandApp: App {
             ThemedRoot {
                 ContentView()
                     .environmentObject(appState)
+                    .onAppear {
+                        appDelegate.prepareForTermination = { await appState.midiUse.stop() }
+                    }
             }
         }
     }

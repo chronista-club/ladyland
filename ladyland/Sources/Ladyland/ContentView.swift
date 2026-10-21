@@ -249,8 +249,8 @@ struct ContentView: View {
                         .help("rail に畳む")
                     }
                     switch assignTab {
-                    case .keystage, .lpd8, .roto, .jack:
-                        // 機材 3 面 + Jack は**切り離せる**（PaneWindows）。中身は
+                    case .keystage, .lpd8, .roto, .jack, .mixer, .xtouch:
+                        // 機材 3 面 + Jack + Mixer は**切り離せる**（PaneWindows）。中身は
                         // SurfaceContent に 1 か所 — サイドバーと別ウィンドウで同じ View
                         if let pane = PaneID(surface: assignTab) {
                             if appState.panes.isOpen(pane) {
@@ -431,6 +431,7 @@ struct ContentView: View {
                     pedal: appState.pedalMode,
                     clockBPM: appState.clockBPM,
                     tempoSyncEnabled: appState.tempoSyncEnabled,
+                    transport: appState.transportReadout,
                     // 席の明示色（パラメータ色 > 席色）を弧に映し、右クリックで
                     // 付けられる（mako 要望 2026-08-16「アイコンに色をつける動線」）
                     cellColor: { appState.rotoSeatCellColors()[$0] },
@@ -464,7 +465,7 @@ struct ContentView: View {
             // 操作の知識: クリック=ロード/選択 1-8=選択 ⌘矢印=カーソル
             // ⌘⏎=draft 昇格 ←→=順送り ↑↓=音量 番号ドラッグ=並び替え Esc=全消音）
             HStack {
-                rotoShadowFooter
+                rotoStatusFooter
                 Spacer()
 
                 // PC キーボード演奏モード中の常駐表示（Tab で切替。
@@ -543,34 +544,26 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// ROTO 差分焼きの影の状態 — footer 常駐のリアルタイム表示（mako 要望
-    /// 2026-08-13「shadow の状態ってそこにリアルタイム表示できる？」）。
-    /// 同期は無彩色で静かに、影なし/ポート待ちだけ警告色（正常時は目立たない）
+    /// サービスの設定状態。旧いローカルの影を「同期済み」として表示しない。
     @ViewBuilder
-    private var rotoShadowFooter: some View {
+    private var rotoStatusFooter: some View {
+        let device = appState.midiUse.devices.first { $0.deviceID == "roto" }
         Group {
-            switch appState.rotoShadowStatus {
-            case .unprimed:
-                Text("影: なし")
-                    .foregroundColor(theme.semanticWarningText)
-                    .help("差分焼きは沈黙中 — ROTO Surface の全焼きが再出発点")
-            case .synced(let note):
-                Text("影: 同期（\(note)）")
-                    .foregroundColor(theme.textTertiary)
-            case .waiting:
-                Text("影: 差分待ち…")
-                    .foregroundColor(theme.textSecondary)
-            case .burning(let note):
-                Text("影: 焼き中（\(note)）")
-                    .foregroundColor(theme.brandPrimary)
-            case .portBusy:
-                Text("影: ポート待ち")
-                    .foregroundColor(theme.semanticWarningText)
-                    .help("シリアルポートが取れない — ROTO-SETUP が開いていないか確認")
+            if device?.present != true {
+                Text("ROTO: 未接続").foregroundColor(theme.textTertiary)
+            } else if device?.configuring == true || appState.midiUse.rotoConfiguring {
+                Text("ROTO: 設定中…").foregroundColor(theme.textSecondary)
+            } else if device?.configError != nil || appState.midiUse.rotoSetupError != nil {
+                Text("ROTO: 設定エラー").foregroundColor(theme.semanticWarningText)
+                    .help("設定の MIDI 機材で詳細を確認できます")
+            } else if case .failed = appState.rotoSetupSync.status {
+                Text("ROTO: 書き込みエラー").foregroundColor(theme.semanticWarningText)
+                    .help(appState.rotoSetupSync.message ?? "")
+            } else {
+                Text("ROTO: \(appState.rotoSetupSync.message ?? "待機中")").foregroundColor(theme.textTertiary)
             }
         }
         .font(LadylandFont.caption)
-        .monospacedDigit()
     }
 
     // MARK: - トラックレーン（横一列。mako 裁定 2026-08-02）
@@ -634,9 +627,12 @@ struct ContentView: View {
                                     CreoBadge("鍵1", variant: .brand, size: .s, shape: .square)
                                         .help("鍵盤 1（Keystage）はこの席を弾く（右クリックで解除）")
                                 }
+                                if appState.miniLabSlot == slot.index {
+                                    CreoBadge("MiniLab", variant: .brand, size: .s, shape: .square)
+                                }
                                 if appState.secondKeyboardSlot == slot.index {
                                     CreoBadge("鍵2", variant: .brand, size: .s, shape: .square)
-                                        .help("鍵盤 2（NCXse / MiniLab）はこの席を弾く（右クリックで解除）")
+                                        .help("Numaはこの席を弾く（右クリックで解除）")
                                 }
                             }
                             .padding(4)
@@ -654,13 +650,18 @@ struct ContentView: View {
                                 }
                             }
                             if appState.secondKeyboardSlot == slot.index {
-                                Button("鍵盤 2（MiniLab / NCXse）の固定を解除（選択に追従）") {
+                                Button("Numaの固定を解除（選択に追従）") {
                                     appState.secondKeyboardSlot = nil
                                 }
                             } else {
-                                Button("鍵盤 2（MiniLab / NCXse）をこの席に固定") {
+                                Button("Numaをこの席に固定") {
                                     appState.secondKeyboardSlot = slot.index
                                 }
+                            }
+                            if appState.miniLabSlot == slot.index {
+                                Button("MiniLab の固定を解除（選択に追従）") { appState.miniLabSlot = nil }
+                            } else {
+                                Button("MiniLab をこの席に固定") { appState.miniLabSlot = slot.index }
                             }
                             // 席を空にする（今の姿は draft として棚に残る —
                             // タイルメニューから着せ直せる）

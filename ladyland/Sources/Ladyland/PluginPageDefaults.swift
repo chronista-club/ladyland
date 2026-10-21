@@ -42,7 +42,7 @@ struct PluginPageDefaults: Codable, Equatable {
         entries[plugin] = entry
     }
 
-    // MARK: - 置き場所（差分焼きの影 roto-shadow.json と同じ作法）
+    // MARK: - 置き場所（Application Support 内の永続データ）
 
     static var defaultURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

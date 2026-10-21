@@ -20,7 +20,7 @@
 
 ## 必要環境
 
-- macOS 14 以降、Apple Silicon
+- macOS 15 以降、Apple Silicon
 - Xcode 26（Swift 6 ツールチェーン）
 - Rust（`fieldd` のビルド）
 - 音源として KORG Gadget などの AU プラグイン（無くても起動はする）

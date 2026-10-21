@@ -96,6 +96,12 @@ final class InstrumentSlot: ObservableObject, Identifiable {
         didSet { applyGain() }
     }
 
+    @Published var pan: Float = 0 { didSet { applyGain() } }
+    @Published var solo = false { didSet { onSoloChanged?() } }
+    var onSoloChanged: (() -> Void)?
+    var soloSuppressed = false { didSet { applyGain() } }
+    var effectiveGain: Float { mute || soloSuppressed ? 0 : gain }
+
     /// トラックカラー（ROTO 83 色パレットの index。nil = 未設定）。
     /// **席の属性であって楽器の属性ではない** — 差し替えても残る。
     /// Track 面で設定し、タイルのストライプと ROTO の焼き色に出る
@@ -160,7 +166,7 @@ final class InstrumentSlot: ObservableObject, Identifiable {
     fileprivate func releaseContents() -> SlotContents {
         let contents = SlotContents(
             audioUnit: audioUnit, displayName: displayName,
-            gain: gain, mute: mute, rotoColor: rotoColor, customName: customName,
+            gain: gain, mute: mute, pan: pan, solo: solo, rotoColor: rotoColor, customName: customName,
             knobMappings: knobMappings
         )
         audioUnit?.removeTap(onBus: 0)
@@ -176,6 +182,8 @@ final class InstrumentSlot: ObservableObject, Identifiable {
     fileprivate func adoptContents(_ contents: SlotContents) {
         gain = contents.gain
         mute = contents.mute
+        pan = contents.pan
+        solo = contents.solo
         rotoColor = contents.rotoColor
         customName = contents.customName
         knobMappings = contents.knobMappings
@@ -223,14 +231,15 @@ final class InstrumentSlot: ObservableObject, Identifiable {
                 // post-fader 表示: tap はゲイン適用前の生出力なので、表示時に
                 // gain を掛ける（フェーダーを下げたらメーターも下がる = DAW の慣習）。
                 // attack は即時、release は緩やか（メーターバリスティクス）
-                self.level = max(peak * self.gain, self.level * 0.7)
+                self.level = max(peak * self.effectiveGain, self.level * 0.7)
             }
         }
     }
 
     private func applyGain() {
         // AVAudioUnit は AVAudioMixing に適合しており volume を直接持つ
-        (audioUnit as? AVAudioMixing)?.volume = mute ? 0 : gain
+        (audioUnit as? AVAudioMixing)?.volume = effectiveGain
+        (audioUnit as? AVAudioMixing)?.pan = pan
     }
 
     /// MIDI バイト列を送る（ロード済みのときだけ）
@@ -259,7 +268,7 @@ final class InstrumentSlot: ObservableObject, Identifiable {
     func snapshot() -> SlotSnapshot? {
         guard let unit = audioUnit else {
             guard !drafts.isEmpty || defaultSnapshot != nil || rotoColor != nil
-                || customName != nil
+                || customName != nil || gain != 0.8 || mute || pan != 0 || solo
             else { return nil }
             // live は空（component 識別 0 = 空印。復元側はロードせず
             // 棚と席の属性だけ戻す）
@@ -267,6 +276,8 @@ final class InstrumentSlot: ObservableObject, Identifiable {
                 index: index, componentType: 0, componentSubType: 0,
                 componentManufacturer: 0, name: "", gain: gain, state: nil, knobs: nil)
             snap.mute = mute ? true : nil
+            snap.pan = pan
+            snap.solo = solo
             snap.rotoColor = rotoColor
             snap.customName = customName
             snap.drafts = drafts.isEmpty ? nil : drafts
@@ -285,6 +296,8 @@ final class InstrumentSlot: ObservableObject, Identifiable {
             knobs: knobMappings.isEmpty ? nil : knobMappings
         )
         snap.mute = mute ? true : nil
+        snap.pan = pan
+        snap.solo = solo
         snap.rotoColor = rotoColor
         snap.customName = customName
         snap.drafts = drafts.isEmpty ? nil : drafts
@@ -300,6 +313,8 @@ final class InstrumentSlot: ObservableObject, Identifiable {
         }
         gain = snap.gain
         mute = snap.mute ?? false
+        pan = min(1, max(-1, snap.pan ?? 0))
+        solo = snap.solo ?? false
         rotoColor = snap.rotoColor
         customName = snap.customName
         knobMappings = snap.knobs ?? []
@@ -393,6 +408,8 @@ fileprivate struct SlotContents {
     var displayName: String?
     var gain: Float
     var mute: Bool
+    var pan: Float
+    var solo: Bool
     var rotoColor: UInt8?
     var customName: String?
     var knobMappings: [FaceKnobMapping]
@@ -418,6 +435,15 @@ final class InstrumentRack: ObservableObject {
     static var bankCount: Int { trackCount / visibleCount }
 
     let engine = AVAudioEngine()
+    @Published var masterGain: Float = 1 {
+        didSet { engine.mainMixerNode.outputVolume = masterGain }
+    }
+
+    func refreshSolos() {
+        let all = slots + [drumSlot]
+        let anySolo = all.contains { $0.solo }
+        for slot in all { slot.soloSuppressed = anySolo && !slot.solo }
+    }
 
     let slots: [InstrumentSlot]
     let drumSlot: InstrumentSlot
@@ -496,7 +522,12 @@ final class InstrumentRack: ObservableObject {
         // カタログを組む前にやること — 後だと列挙に間に合わない
         LadySynth.register()
         LadySampler.register()
-        catalog = PluginCatalog.instruments()
+        // 登録は一覧へ非同期に届くので、2 つは記述から直接足す（PluginCatalog.instruments）
+        catalog = PluginCatalog.instruments(builtIns: [LadySynth.catalogEntry, LadySampler.catalogEntry])
+        for slot in slots + [drumSlot] {
+            slot.onSoloChanged = { [weak self] in self?.refreshSolos() }
+        }
+
         // 登録がカタログに届いたかを残す（`registerSubclass` はプロセス内
         // 登録なので、`AVAudioUnitComponentManager` が拾うかは実測でしか分からない）
         let found = catalog.contains { $0.name == LadySynth.displayName }
@@ -559,6 +590,7 @@ final class InstrumentRack: ObservableObject {
 
         do {
             try engine.start()
+            hostTempo.running = true
         } catch {
             // ⚠️ **fail-open**。明示フォーマットが原因かもしれないので、
             // 従来の繋ぎ方へ戻してもう一度だけ試す。ここも駄目なら呼び出し元へ
@@ -568,6 +600,7 @@ final class InstrumentRack: ObservableObject {
                 error.localizedDescription)
             connectMixerChain(format: nil)
             try engine.start()
+            hostTempo.running = true
         }
         let after = engine.outputNode.outputFormat(forBus: 0)
         NSLog("device[start 後]: %.0f Hz / %u ch", after.sampleRate, after.channelCount)
@@ -598,7 +631,7 @@ final class InstrumentRack: ObservableObject {
             "mixer: 合流点が %.0f Hz のまま — %.0f Hz へ揃え直す",
             current.sampleRate, target.sampleRate)
         let wasRunning = engine.isRunning
-        if wasRunning { engine.stop() }
+        if wasRunning { hostTempo.running = false; engine.stop() }
         connectMixerChain(format: target)
         if restart(wasRunning) { return }
 
@@ -843,7 +876,7 @@ final class InstrumentRack: ObservableObject {
         // **捕まえられない ObjC 例外が、捕まえられる Swift の throw に変わる**。
         // これで fail-open が意図どおり効くようになる
         let wasRunning = engine.isRunning
-        if wasRunning { engine.stop() }
+        if wasRunning { hostTempo.running = false; engine.stop() }
 
         // ⚠️ **合流点も一緒に追従させる**（同じ停止窓に相乗り）。
         // ここを置いていくと `AU 192k → mixer 44.1k → output 192k` の往復が残り、
@@ -930,6 +963,7 @@ final class InstrumentRack: ObservableObject {
         guard wasRunning else { return true }
         do {
             try engine.start()
+            hostTempo.running = true
             return true
         } catch {
             NSLog("sampler: ⚠️ エンジンを掛け直せない — %@", error.localizedDescription)
@@ -1086,6 +1120,8 @@ final class InstrumentRack: ObservableObject {
         // テンポの口は**繋ぐ前に**渡す — render が始まってから差し替えると
         // 別プロセスの AUv3 が落ちる（HostTempo.swift）
         unit.auAudioUnit.musicalContextBlock = hostTempo.musicalContextBlock
+        // transport の口も同じく繋ぐ前に 1 回だけ（design/11）
+        unit.auAudioUnit.transportStateBlock = hostTempo.transportStateBlock
         engine.attach(unit)
 
         // ⚠️ **レートを合わせるのは楽器の種類と無関係**（実測 2026-08-07）。
@@ -1286,6 +1322,7 @@ final class InstrumentRack: ObservableObject {
         var snapshot = RackSnapshot(
             slots: snaps, selected: selected, outputDeviceUID: outputDeviceUID)
         snapshot.trackCount = Self.trackCount
+        snapshot.masterGain = masterGain
         // windowStart は表示窓時代の遺物 — 全面グリッド化（2026-08-01）で
         // 導出値（bankStart）になったため、もう書かない（旧ファイルは読み飛ばす）
         return snapshot
@@ -1296,6 +1333,7 @@ final class InstrumentRack: ObservableObject {
     /// 1 スロットの失敗（AU がアンインストールされた等）は該当スロットを
     /// 空のまま残して続行する — fail-open（design/06 §1「確実に動く」）。
     func restore(from snapshot: RackSnapshot) async {
+        masterGain = min(1, max(0, snapshot.masterGain ?? 1))
         let savedTrackCount = snapshot.trackCount ?? 8  // 旧ファイル = 総数 8 の時代
         for snap in snapshot.slots {
             let slot: InstrumentSlot

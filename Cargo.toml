@@ -29,23 +29,23 @@ tokio = { version = "1.0", features = ["full"] }
 crossbeam-channel = "0.5"
 
 # Audio
-cpal = "0.15"
-symphonia = { version = "0.5", features = ["all"] }
+cpal = "0.17"
+symphonia = { version = "0.6", features = ["all"] }
 rustfft = "6.2"
 
 # Graphics
-wgpu = "28.0"
-glyphon = "0.10"
+wgpu = "30.0"
+glyphon = "0.12"
 winit = "0.30"
 bytemuck = { version = "1.14", features = ["derive"] }
 
 # MIDI
-midir = "0.10"
-midi-msg = "0.6"
+midir = "0.11"
+midi-msg = "0.9"
 
 # Video
-video-rs = "0.9"
-ndarray = "0.15"
+video-rs = { version = "0.12", features = ["ndarray"] }
+ndarray = "0.17"
 
 # Plugin Hosting
 rack = "0.4"

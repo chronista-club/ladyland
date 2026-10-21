@@ -1,0 +1,199 @@
+{
+  "note": "studio.blend から生成。単位 mm。配置の編集は Blender で行う。",
+  "desk": {
+    "center": [
+      -200.0,
+      -175.0
+    ],
+    "size": [
+      2050.0,
+      1790.0
+    ]
+  },
+  "surfaces": [
+    {
+      "id": "Front desk",
+      "center": [
+        0.0,
+        -566.5
+      ],
+      "size": [
+        1650.0,
+        917.0
+      ],
+      "elevation": 740.0,
+      "thickness": 40.0
+    },
+    {
+      "id": "Left Numa desk",
+      "center": [
+        -1069.0,
+        20.0
+      ],
+      "size": [
+        312.0,
+        1400.0
+      ],
+      "elevation": 740.0,
+      "thickness": 40.0
+    },
+    {
+      "id": "Unified low shelf",
+      "center": [
+        0.0,
+        -739.25
+      ],
+      "size": [
+        1560.0,
+        661.5
+      ],
+      "elevation": 850.0,
+      "thickness": 40.0
+    }
+  ],
+  "gear": [
+    {
+      "id": "fgdp",
+      "center": [
+        -550.0,
+        -520.0
+      ],
+      "size": [
+        223.0,
+        223.0
+      ],
+      "height": 48.0,
+      "elevation": 850.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "keystage",
+      "center": [
+        0.0,
+        -225.0
+      ],
+      "size": [
+        979.26,
+        234.0
+      ],
+      "height": 77.25,
+      "elevation": 740.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "lpd8",
+      "center": [
+        -180.0,
+        -520.0
+      ],
+      "size": [
+        306.0,
+        81.0
+      ],
+      "height": 33.25,
+      "elevation": 850.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "minilab",
+      "center": [
+        550.0,
+        -520.0
+      ],
+      "size": [
+        355.0,
+        220.0
+      ],
+      "height": 46.25,
+      "elevation": 850.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "nanokontrol",
+      "center": [
+        180.0,
+        -520.0
+      ],
+      "size": [
+        325.0,
+        83.0
+      ],
+      "height": 29.25,
+      "elevation": 850.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "numa",
+      "center": [
+        -1025.0,
+        20.0
+      ],
+      "size": [
+        1270.42,
+        224.0
+      ],
+      "height": 88.35,
+      "elevation": 740.0,
+      "yaw": 90.0
+    },
+    {
+      "id": "roto",
+      "center": [
+        -430.0,
+        -960.0
+      ],
+      "size": [
+        341.0,
+        99.0
+      ],
+      "height": 44.25,
+      "elevation": 850.0,
+      "yaw": 0.0
+    },
+    {
+      "id": "xtouch",
+      "center": [
+        0.0,
+        -900.0
+      ],
+      "size": [
+        452.0,
+        301.0
+      ],
+      "height": 100.35,
+      "elevation": 850.0,
+      "yaw": 0.0
+    }
+  ],
+  "tray": {
+    "mixer": [
+      -120.0,
+      -680.0
+    ],
+    "trackKnobs": [
+      120.0,
+      -680.0
+    ]
+  },
+  "trayElevation": 850.0,
+  "camera": {
+    "at": [
+      0.0,
+      884.24,
+      -359.474
+    ],
+    "up": [
+      0.0,
+      0.909,
+      -0.416
+    ],
+    "fov": 57.2209,
+    "projection": "perspective",
+    "from": [
+      0.0,
+      1300.0,
+      550.0
+    ],
+    "aspectRatio": 1.5789473684210527
+  }
+}

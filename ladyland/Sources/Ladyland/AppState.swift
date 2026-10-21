@@ -26,8 +26,24 @@ final class AppState: ObservableObject {
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
     /// 固定先が選択と割れても正しい席の割当を見る — `drumFaceKnobs` と同じ作法）
     let secondFaceKnobs = FaceKnobController()
+    let miniLabFaceKnobs = FaceKnobController()
+    @Published var studioSelection = StudioTrackSelection()
+    @Published var miniLabSlot: Int? {
+        didSet {
+            guard miniLabSlot != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()
+        }
+    }
+    /// 操作面（nanoKONTROL2）のフェーダー → 音量のピックアップ（席ごと。
+    /// バンクを替えた直後に実機のフェーダー位置で音量が跳ばないように）
+    private var surfaceGainPickup = KnobPickup(knobCount: InstrumentRack.trackCount + 1)
     let thumbnails = PluginThumbnailStore()
-    let ledBus = LedBus()
+    let midiUse = MIDIUseSession()
+    lazy var rotoSetupSync = RotoSetupSync(session: midiUse)
+    lazy var xtouch = XTouchController(rack: rack, onSelect: { [weak self] in self?.select($0) },
+        onChange: { [weak self] in self?.scheduleAutosave() })
+    lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
     let roto = RotoService()
     /// Keystage の ARP / CHORD 設定を送り込む常駐（push 型。docs/keystage/README.md）
@@ -93,7 +109,18 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// 鍵盤 2（NCXse / MiniLab）= シンセ入力 2 の担当スロット（**nil = 選択に
+    /// **LPD8 ノブ 8 の刺し先**（spec/09 Jack。mako 裁定 2026-09-26「Keystage の
+    /// つまみで出来ていたことを LPD8 で代用したい」）。drums = ドラム席の顔つまみ
+    /// （従来）、face = 選択 Track の顔つまみ（位置 → 現ページの席）
+    @Published var lpd8KnobJack: Lpd8KnobJack = .drums {
+        didSet {
+            guard lpd8KnobJack != oldValue else { return }
+            updateRouting()
+            scheduleAutosave()  // [常時保存 26] LPD8 ノブの刺し先
+        }
+    }
+
+    /// 鍵盤 2（NCXse）= シンセ入力 2 の担当スロット（**nil = 選択に
     /// 追従**。指定 = その席に固定。2nd キーボード計画 ②、mako 裁定 2026-08-10
     /// 「別々の二つの音源同時に弾きたい」）。タイルの右クリックで固定する
     @Published var secondKeyboardSlot: Int? {
@@ -146,7 +173,6 @@ final class AppState: ObservableObject {
         if let index = slot.knobMappings.firstIndex(where: { $0.knob == cc }) {
             slot.knobMappings[index].color = color
             knobMappingsChanged()  // 常時保存（knobs は SlotSnapshot に乗る）
-            scheduleRotoLiveBurn()  // 実機の席色が変わる
         } else {
             // didSet で実機へ即時反映 + 保存
             rotoColors.setCellColor(track: slot.index, cell: cc, to: color)
@@ -201,7 +227,7 @@ final class AppState: ObservableObject {
             guard rotoColors != oldValue else { return }
             roto.colors = rotoColors
             scheduleAutosave()  // [常時保存 22] ROTO の配色
-            scheduleRotoLiveBurn()  // 席色（trackCells）は INST 冊の焼き色にも出る
+            scheduleRotoLiveBurn()
         }
     }
 
@@ -264,6 +290,9 @@ final class AppState: ObservableObject {
     /// いま繋がっている MIDI ソース（Jack 結線図の接続表示用。
     /// `connectSources` の記録をそのまま映す — 挿抜で更新）
     @Published private(set) var midiConnectedSources: [String] = []
+
+    /// 同じものを結線先つきで（Jack 結線図の行 — 汎用鍵盤は名前で行になる）
+    @Published private(set) var midiConnected: [MIDIConnectedSource] = []
 
     @Published private(set) var latchEngaged = false
     @Published private(set) var latchSustaining = 0
@@ -356,8 +385,8 @@ final class AppState: ObservableObject {
 
     // MARK: - ROTO の冊焼き（UI ボタンと外部トリガーの共通入口）
 
-    /// ROTO 3 冊焼きの結果（設定画面の表示用。外部トリガー経由でも更新される）
-    @Published var rotoBurnResult: String?
+    /// サービスが確認した冊書き込みの結果（ボタン・自動追従・通知で共通）。
+    var rotoBurnResult: String? { rotoSetupSync.message }
 
     /// notify_register_dispatch の登録 token（保持しないと解除できない）
     private var agentTriggerTokens: [Int32] = []
@@ -418,187 +447,34 @@ final class AppState: ObservableObject {
         return labels
     }
 
-    /// 3 冊 96 席をアドミンポートへ直接焼く。ブロッキング I/O なので main から
-    /// 降ろす — 焼いている数秒は実機の CC が止まる（瞬間芸の掟。RotoAdminPort）。
-    /// 結果は `rotoBurnResult` と NSLog の両方へ — 外部トリガーから呼ばれた
-    /// ときはログと実機読み戻し（roto-admin info）が観測面になる。
-    /// 成功したら差分焼きの影（`rotoDiffShadow`）をここで初期化する —
-    /// 以降はライブラベル・カラーの変更が自動で差分焼きされる
+    private func rotoSetupPayloads() throws -> [RotoSetupPayload] {
+        try RotoMidiSetupExport.books(
+            slotNames: rotoMixerSlotNames(), slotColors: rotoMixerSlotColors(),
+            seatLabels: rotoSeatLabels(), seatColor: rack.selectedSlot.rotoColor,
+            seatCellColors: rotoSeatCellColors(), assignedSeatsOnly: true,
+            selectedTrack: rack.selected + 1, selectButtonColor: rotoColors.selectButton
+        ).map(RotoMidiSetupExport.servicePayload)
+    }
+
+    /// ボタンと旧 Darwin 通知の共通入口。4 冊ともサービスで読み戻し・差分適用する。
     func burnRotoSetups() {
-        NSLog("roto: burn 入口")
-        rotoBurnResult = "焼き込み中…（数秒。ROTO-SETUP は閉じておく）"
-        rotoShadowStatus = .burning("全冊")
-        let names = rotoMixerSlotNames()
-        let colors = rotoMixerSlotColors()
-        let labels = rotoSeatLabels()
-        let seatColor = rack.selectedSlot.rotoColor
-        let cellColors = rotoSeatCellColors()
-        let selectedTrack = rack.selected + 1
-        let buttonColor = rotoColors.selectButton
-        NSLog("roto: burn 材料そろった — detached へ")
-        Task.detached(priority: .userInitiated) {
-            NSLog("roto: burn detached 開始")
-            let outcome: (summary: String, requests: [(key: RotoMidiSetupExport.SeatKey, request: [UInt8])]?)
-            do {
-                let burned = try RotoMidiSetupExport.burn(
-                    slotNames: names, slotColors: colors,
-                    seatLabels: labels, seatColor: seatColor,
-                    seatCellColors: cellColors,
-                    selectedTrack: selectedTrack,
-                    selectButtonColor: buttonColor)
-                outcome = (burned.summary, burned.requests)
-            } catch {
-                outcome = ("焼き込み失敗: \(error)", nil)
-            }
-            NSLog("roto: burn — %@", outcome.summary)
-            await MainActor.run {
-                self.rotoBurnResult = outcome.summary
-                if let requests = outcome.requests {
-                    self.rotoDiffShadow.prime(requests)
-                    self.rotoShadowStatus = .synced("全冊 \(Self.shadowClock())")
-                } else {
-                    self.rotoDiffShadow.invalidate()
-                    self.rotoShadowStatus = .unprimed
-                }
-                self.saveRotoShadow()
-            }
-        }
+        do { rotoSetupSync.submit(try rotoSetupPayloads(), force: true) }
+        catch { rotoSetupSync.reject(error) }
     }
 
-    // MARK: - 差分焼き（mako 裁定 2026-08-12「選択変更で自動差分焼き」）
-
-    /// 影の状態（footer に常駐 — mako 要望 2026-08-13「shadow の状態って
-    /// そこにリアルタイム表示できる？」）。遷移は影を動かす場所でだけ更新する
-    enum RotoShadowStatus: Equatable {
-        case unprimed        // 影なし — 差分焼きは沈黙、全焼きが再出発点
-        case synced(String)  // 実機と一致（摘要 = 最後の動き）
-        case waiting         // デバウンス中 — 変更を束ねている
-        case burning(String)  // シリアルへ書き込み中（摘要 = 規模）
-        case portBusy        // ポートが取れない — リトライ待ち
-    }
-    @Published private(set) var rotoShadowStatus: RotoShadowStatus = .unprimed
-
-    /// 摘要に付ける時刻（HH:mm:ss — 「いつの同期か」が動きの証拠になる）
-    private static func shadowClock() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: Date())
-    }
-
-    /// 差分焼きの影（実機に焼いてある 192 席の姿。全焼きの成功で初期化、
-    /// ディスクにも残す — 再起動しても差分焼きが即効く）
-    private var rotoDiffShadow = RotoDiffShadow()
-
-    /// 影の保存先。実機の設定はフラッシュに残るのだから影も残す（対称）
-    private static var rotoShadowURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ladyland/roto-shadow.json")
-    }
-
-    /// 影が変わったら必ず呼ぶ（prime / pending 前進 / invalidate の後）
-    private func saveRotoShadow() {
-        guard let data = try? JSONEncoder().encode(rotoDiffShadow) else { return }
-        try? data.write(to: Self.rotoShadowURL, options: .atomic)
-    }
-
-    /// 起動時に影を読み戻す（無ければ未 prime のまま = 全焼きが再出発点）
-    private func loadRotoShadow() {
-        guard let data = try? Data(contentsOf: Self.rotoShadowURL),
-            let restored = try? JSONDecoder().decode(RotoDiffShadow.self, from: data)
-        else { return }
-        rotoDiffShadow = restored
-        if restored.isPrimed {
-            rotoShadowStatus = .synced("復元")
-            NSLog("roto: 影を復元 — 差分焼きは再起動をまたいで有効")
-        }
-    }
-
-    /// 予約中の差分焼き（デバウンス — 選択の連打は静まってから 1 発）
-    private var rotoLiveBurnTask: Task<Void, Never>?
-
-    /// **席の見た目が変わりうる操作の後に呼ぶ**（`updateRouting` に相乗り +
-    /// トラック名・カラー変更）。1 秒のデバウンスで束ね、影との差分だけを
-    /// シリアルへ撃つ。焼き中は CC が止まるので、**操作が静まるのを待ってから
-    /// 1 発** — 選択を連打しても止まるのは最後の 1 回ぶんだけ。
-    /// 影が無い間（全焼き前 / 失敗後）は沈黙 — 「ROTO へ直接焼く」が再出発点
+    /// 希望値を渡すだけ。デバウンス・排他・完了待ちはサービスへの窓口に集約する。
     func scheduleRotoLiveBurn() {
-        guard rotoDiffShadow.isPrimed, roto.connected else { return }
-        rotoLiveBurnTask?.cancel()
-        rotoShadowStatus = .waiting
-        rotoLiveBurnTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            self?.rotoLiveBurnTask = nil
-            self?.performRotoLiveBurn()
-        }
+        do { rotoSetupSync.submit(try rotoSetupPayloads()) }
+        catch { rotoSetupSync.reject(error) }
     }
 
-    private func performRotoLiveBurn() {
-        let requests = RotoMidiSetupExport.allRequests(
-            slotNames: rotoMixerSlotNames(),
-            slotColors: rotoMixerSlotColors(),
-            seatLabels: rotoSeatLabels(),
-            seatColor: rack.selectedSlot.rotoColor,
-            seatCellColors: rotoSeatCellColors(),
-            selectedTrack: rack.selected + 1,
-            selectButtonColor: rotoColors.selectButton)
-        let pending = rotoDiffShadow.pending(requests)
-        guard !pending.isEmpty else {
-            rotoShadowStatus = .synced("差分なし \(Self.shadowClock())")
-            return
-        }
-        rotoShadowStatus = .burning("\(pending.count) 席")
-        Task.detached(priority: .userInitiated) {
-            do {
-                let summary = try RotoMidiSetupExport.burnDiff(pending)
-                NSLog("roto: 差分焼き — %@", summary)
-                // ⚠️ **ディスク保存は焼きが成功してから**。pending 直後に保存
-                // する楽観方式は、焼き完了前の quit（--reinstall）で「影だけ
-                // 進んで実機に書かれない」乖離を作った — 影が期待と一致して
-                // diff が出ず、実機の古い表示が直らない（実例 2026-08-13:
-                // L02 INST #25 / L03 INST2 #2 の冊名割れ）。成功後保存なら
-                // quit で焼きが飛んでもディスクは古いまま = 次回起動で自己修復
-                await MainActor.run {
-                    self.saveRotoShadow()
-                    self.rotoShadowStatus = .synced("\(pending.count) 席 \(Self.shadowClock())")
-                }
-            } catch RotoMidiSetupExport.BurnDiffError.nothingWritten(let underlying) {
-                // 1 件も書く前の失敗（ポート使用中 = 読み戻しベンチとの競合、
-                // 探索失敗）— **実機は無傷なので影を捨てない**。ディスクの影
-                // （前回成功時の姿）をメモリへ読み戻して仕切り直し、少し
-                // 待ってから再試行（実例 2026-08-13: 競合タイムアウトで影を
-                // 捨てて追従が止まった — 一時的な失敗で死なない設計へ）
-                NSLog("roto: 差分焼き — ポートが取れない（%@）。リトライ",
-                    String(describing: underlying))
-                await MainActor.run {
-                    self.rotoShadowStatus = .portBusy
-                    self.loadRotoShadow()
-                    self.scheduleRotoLiveBurn()  // → .waiting（primed なら）
-                }
-            } catch {
-                // 途中まで書けた — どこまで実機に入ったか分からないので
-                // 影ごと捨てて差分焼きを黙らせる（全焼きボタンで信頼を再出発）
-                NSLog("roto: 差分焼き失敗 — 影を捨てて停止: %@", String(describing: error))
-                await MainActor.run {
-                    self.rotoDiffShadow.invalidate()
-                    self.saveRotoShadow()
-                    self.rotoShadowStatus = .unprimed
-                }
-            }
-        }
-    }
-
-    /// エージェントの外部トリガー（mako 要望 2026-08-12「ROTO へ直接焼くの
-    /// 経路をそちらで打てたりしないの？」）。ターミナルから
-    /// `notifyutil -p club.chronista.ladyland.roto.burn` で UI ボタンと同じ
-    /// 焼きが走る。Darwin 通知はローカル専用・引数なしの最小口 —
-    /// 引数が要る操作が増えたら unison サーバーへ昇格する
+    /// 外部トリガーも UI と同じ Apply 経路を使う。
     private func installAgentTriggers() {
         var token: Int32 = 0
         notify_register_dispatch(
             "club.chronista.ladyland.roto.burn", &token, DispatchQueue.main
         ) { [weak self] _ in
-            NSLog("roto: 外部トリガー受信 — 冊を焼く")
+            NSLog("roto: 外部トリガー受信 — 冊をサービス経由で焼く")
             self?.burnRotoSetups()
         }
         agentTriggerTokens.append(token)
@@ -687,6 +563,8 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -730,6 +608,7 @@ final class AppState: ObservableObject {
     }
 
     func start() {
+        bindMIDIUseSession()
         startCoreRuntime()
         startFieldProjection()
         observeOutputDevices()
@@ -739,8 +618,66 @@ final class AppState: ObservableObject {
         startKeystageService()
         bindLpd8Editor()
         restoreSession()
+        midiUse.start()
         observeThemeChanges()
         startSelfTestIfRequested()
+    }
+
+    private func bindMIDIUseSession() {
+        let access = midiUse.access
+        rotoSetupSync.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        roto.onSelectSetup = { [weak self] setup in
+            guard let self else { throw MIDIUseError.unavailable }
+            try await self.midiUse.selectRotoSetup(setup)
+        }
+        MIDISysExSender.setEndpointAccess(input: { access.allowsInput($0) },
+                                         output: { access.allowsOutput($0) })
+        ledBus.setDeviceAvailable(false)
+        midiUse.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        midiUse.onReleased = { [weak self] device in
+            guard let self else { return }
+            self.midi?.refresh()
+            self.router.releaseDevice(device.deviceID)
+            switch device.profileID {
+            case "lpd8":
+                self.ledBus.setDeviceAvailable(false)
+                self.lpd8Editor.releaseDevice()
+            case "roto":
+                await self.roto.releaseDevice()
+            case "keystage": await self.keystage.releaseDevice()
+            case "xtouch": await self.xtouch.stop()
+            case "nanokontrol": self.surfaceGainPickup.reset()
+            default: break
+            }
+        }
+        midiUse.onAcquired = { [weak self] device in
+            guard let self else { return }
+            switch device.profileID {
+            case "lpd8": self.ledBus.setDeviceAvailable(true)
+            case "roto":
+                self.roto.acquireDevice()
+                self.scheduleRotoLiveBurn()
+            case "keystage": self.keystage.acquireDevice()
+            case "xtouch":
+                guard let lease = device.lease?.token else { return }
+                self.xtouch.start(ready: { [weak self] in await self?.restoreTask?.value }) { [weak self] bytes in
+                    guard let self else { throw MIDIUseError.unavailable }
+                    try await self.midiUse.sendXTouch(bytes, lease: lease)
+                }
+            default: break
+            }
+        }
+        midiUse.onSnapshot = { [weak self] snapshot in
+            guard let self else { return }
+            self.rotoSetupSync.refresh()
+            self.midi?.updateDevices(snapshot)
+            self.midiConnectedSources = self.midi?.connectedSources ?? []
+            self.midiConnected = self.midi?.connected ?? []
+        }
     }
 
     /// ログを開いてから Audio / MIDI を起動する。ログの取りこぼしを防ぐため、
@@ -750,9 +687,6 @@ final class AppState: ObservableObject {
         // 以降の起動ログも全部乗る）
         debugLog.startCapture()
         debugLog.startFileLog()
-
-        // 差分焼きの影を読み戻す — 再起動のたびに全焼きしなくて済む
-        loadRotoShadow()
 
         // ⚠️ **rack の init は捕捉より前に走る**ので、そこで出したログは
         // ファイルに残らない。自作シンセが列挙に出たかはここで確かめる
@@ -773,7 +707,11 @@ final class AppState: ObservableObject {
 
         do {
             try rack.start()
-            let input = MIDIInput(router: router)
+            let input = MIDIInput(router: router, access: midiUse.access)
+            input.onXTouch = { [weak self] status, a, b in
+                guard let event = XTouchMCU.decode(status, a, b) else { return }
+                self?.xtouch.handle(event)
+            }
             try input.start()
             midi = input
             updateRouting()
@@ -901,6 +839,12 @@ final class AppState: ObservableObject {
             }
         }
 
+        // 操作面（nanoKONTROL2）→ 机で載せた部品の操作（mako 2026-10-04
+        // 「ナノコントロール 2 の上にミキサーを置く」）
+        router.setSurfaceHandler { [weak self] cc, value in
+            DispatchQueue.main.async { self?.handleSurface(cc: cc, value: value) }
+        }
+
         // MIDI ルーティングトレース → Debug ウィンドウ（design/06 §8 追補）。
         // RT スレッドで MidiRoute 値型が発行され、ここ（main）で名前を足して
         // 整形する。連続ストリームは collapse key で 1 行に畳まれる
@@ -914,7 +858,8 @@ final class AppState: ObservableObject {
                 let secondName =
                     "slot \(secondIndex + 1) (\(self.rack.slots.indices.contains(secondIndex) ? (self.rack.slots[secondIndex].displayName ?? "empty") : "?"))"
                 let line = MidiTraceFormat.line(
-                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName)
+                    route, selectedSlot: selected, drumSlot: drums, secondSlot: secondName,
+                    miniLabSlot: "slot \((self.miniLabSlot ?? self.rack.selected) + 1)")
                 self.debugLog.append(line.text, collapseKey: line.key, kind: .midi)
 
                 // ノブページの追従（ノブストリップの見出し）。トレースは
@@ -958,13 +903,12 @@ final class AppState: ObservableObject {
             }
         })
         midi?.onSetupChanged = { [weak self] in
-            self?.ledBus.reconnect()
-            self?.roto.reconnect()
-            self?.keystage.reconnect()
             // Jack 結線図の接続表示（挿抜で線の色が変わる）
             self?.midiConnectedSources = self?.midi?.connectedSources ?? []
+            self?.midiConnected = self?.midi?.connected ?? []
         }
         midiConnectedSources = midi?.connectedSources ?? []
+        midiConnected = midi?.connected ?? []
         ledBus.start()
         pushBaseColors()
     }
@@ -1024,12 +968,8 @@ final class AppState: ObservableObject {
     private func bindLpd8Editor() {
         // LPD8 エディタの配線（design/06 §8）: 送信口 / SysEx 受信 /
         // LedBus の suspend 窓 / GET でパッド → ノート対応を実機に追従
-        lpd8Editor.send = { frame in
-            guard let dest = try? MIDISysExSender.destination(matching: "LPD8") else {
-                return false
-            }
-            MIDISysExSender.send(frame, to: dest)
-            return true
+        lpd8Editor.send = { [weak self] frame in
+            self?.midiUse.send(profileID: "lpd8", bytes: frame, completion: {}) ?? false
         }
         lpd8Editor.onBeginSysEx = { [weak self] in self?.ledBus.suspend() }
         lpd8Editor.onEndSysEx = { [weak self] in self?.ledBus.resume() }
@@ -1040,9 +980,7 @@ final class AppState: ObservableObject {
             self?.updateRouting()  // ノブ CC が変われば横取り集合も変わる
         }
         midi?.sysexRelay.setHandler { [weak self] frame in
-            Task { @MainActor [weak self] in
-                self?.lpd8Editor.handleSysEx(frame)
-            }
+            MainActor.assumeIsolated { self?.lpd8Editor.handleSysEx(frame) }
         }
     }
 
@@ -1095,8 +1033,11 @@ final class AppState: ObservableObject {
             pedalInverted = snapshot.pedalInverted ?? false
             // 鍵盤 2 の固定（nil = 選択に追従。導入前のデータもそのまま）
             secondKeyboardSlot = snapshot.secondKeyboardSlot
+            miniLabSlot = snapshot.miniLabSlot
             // シンセ入力 1 の固定（同上）
             synthInput1Slot = snapshot.synthInput1Slot
+            // LPD8 ノブの刺し先（nil = drums = 導入前の挙動）
+            lpd8KnobJack = snapshot.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) ?? .drums
             restoreTask?.cancel()
             restoreTask = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1166,6 +1107,7 @@ final class AppState: ObservableObject {
     // MARK: - UI からの操作（すべてここを通す）
 
     func select(_ index: Int) {
+        if studioSelection.pending?.slot != index { studioSelection.cancel() }
         rack.select(index)
         updateRouting()
         flashSelectionLed()
@@ -1173,6 +1115,7 @@ final class AppState: ObservableObject {
     }
 
     func selectNext() {
+        studioSelection.cancel()
         rack.selectNext()
         updateRouting()
         flashSelectionLed()
@@ -1180,6 +1123,7 @@ final class AppState: ObservableObject {
     }
 
     func selectPrevious() {
+        studioSelection.cancel()
         rack.selectPrevious()
         updateRouting()
         flashSelectionLed()
@@ -1188,6 +1132,7 @@ final class AppState: ObservableObject {
 
     /// 選択カーソルの相対移動（Cmd+矢印: ±1 = 左右、±8 = 行ジャンプ）
     func selectOffset(_ delta: Int) {
+        studioSelection.cancel()
         rack.selectOffset(delta)
         updateRouting()
         flashSelectionLed()
@@ -1338,7 +1283,7 @@ final class AppState: ObservableObject {
     func setTrackColor(_ slot: InstrumentSlot, to color: UInt8?) {
         slot.rotoColor = color
         scheduleAutosave()  // [常時保存 26] トラックカラー
-        scheduleRotoLiveBurn()  // MIXER 席色 + INST 冊の席色が変わる
+        scheduleRotoLiveBurn()
     }
 
     /// トラック名を設定する（Track 面。空・空白だけは nil = プラグイン名へ戻す）
@@ -1346,7 +1291,133 @@ final class AppState: ObservableObject {
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         slot.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed
         scheduleAutosave()  // [常時保存 27] トラック名
-        scheduleRotoLiveBurn()  // MIXER 冊の席名・ミュートボタン名が変わる
+        scheduleRotoLiveBurn()
+    }
+
+    /// 操作面の CC 1 つ — 机で載せた部品が意味を決める（`SurfaceMapping`）
+    func handleSurface(cc: UInt8, value: UInt8) {
+        // トランスポート列は机の部品ではない — 部品より先に見る（design/11）
+        if let action = Transport.action(nanoKontrolCC: cc, value: value) {
+            transport(action)
+            return
+        }
+        let bank = MixerModel.bankIndices(selected: rack.selected, trackCount: rack.slots.count)
+        if windowPlacement.docks?["mixer"] == "nanokontrol.faders" {
+            if (cc == 58 || cc == 59), value > 0 {
+                stepStudioBank(cc == 58 ? -1 : 1)
+                return
+            }
+            if (16..<24).contains(cc), let pending = studioSelection.pending {
+                let column = Int(cc - 16)
+                if bank.indices.contains(column), bank[column] == pending.slot {
+                    studioSelection.turn(slot: pending.slot, value: value)
+                    return
+                }
+            }
+        }
+        guard
+            let action = SurfaceMapping.action(
+                cc: cc, value: value, docks: windowPlacement.docks ?? [:], bank: bank,
+                page: activeKnobPage ?? rotoPage)
+        else { return }
+        switch action {
+        case .selectInput(let index):
+            pressStudioSelect(index)
+        case .gain(let index, let gain):
+            guard rack.slots.indices.contains(index) else { return }
+            let slot = rack.slots[index]
+            // ピックアップ — 実機のフェーダーが今の音量を通るまで掴まない
+            guard surfaceGainPickup.accept(knob: index, value: Double(gain), target: Double(slot.gain))
+            else { return }
+            setGain(slot, to: gain)
+        case .toggleMute(let index):
+            guard rack.slots.indices.contains(index) else { return }
+            toggleMute(rack.slots[index])
+        case .trackKnob(let seat, let value):
+            faceKnobs.handle(knob: seat, value127: Int(value))
+            scheduleAutosave()  // [常時保存 29] 操作面 → Track ノブ
+        }
+    }
+
+    func studioKeyboardSlot(_ keyboard: StudioKeyboard) -> Int? {
+        switch keyboard {
+        case .numa: secondKeyboardSlot
+        case .keystage: synthInput1Slot
+        case .miniLab: miniLabSlot
+        }
+    }
+
+    func studioInputs(for index: Int) -> [StudioKeyboard] {
+        StudioKeyboard.allCases.filter { (studioKeyboardSlot($0) ?? rack.selected) == index }
+    }
+
+    func pressStudioSelect(_ index: Int) {
+        guard rack.slots.indices.contains(index) else { return }
+        // Read the current source before selecting: unbound keyboards follow selection.
+        let current = studioInputs(for: index).first
+        let commit = studioSelection.press(slot: index, current: current)
+        select(index)
+        if let commit {
+            switch commit.keyboard {
+            case .numa: secondKeyboardSlot = commit.slot
+            case .keystage: synthInput1Slot = commit.slot
+            case .miniLab: miniLabSlot = commit.slot
+            }
+        }
+    }
+
+    // MARK: - トランスポート（design/11。mako 裁定 2026-10-09「Aで進めよう」）
+
+    /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
+    /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
+    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル、<< >> = 小節単位で
+    /// 頭を置き直す（フレーズの中の位置をずらす。スロット移動は TRACK ◀▶ の仕事）
+    func transport(_ action: TransportAction) {
+        switch action {
+        case .play:
+            rack.hostTempo.declareDownbeat()
+            NSLog("transport: PLAY — 小節の頭を宣言")
+        case .stop:
+            rack.hostTempo.resetBeat()
+            panic()
+        case .record:
+            rack.hostTempo.recordArmed.toggle()
+            NSLog("transport: REC 待機 %@", rack.hostTempo.recordArmed ? "on" : "off")
+        case .rewind:
+            rack.hostTempo.shiftDownbeat(bars: -1)
+        case .fastForward:
+            rack.hostTempo.shiftDownbeat(bars: 1)
+        }
+        refreshTransportReadout()
+    }
+
+    /// 画面用の読み出し（小節.拍 / 経過 / REC）。頭がある間だけ 10Hz で更新し、
+    /// 値が変わった時だけ publish（ノブストリップの再描画嵐を避ける）
+    @Published private(set) var transportReadout: TransportReadout?
+    private var transportTicker: Timer?
+
+    private func refreshTransportReadout() {
+        let next = TransportReadout.make(
+            positionSeconds: rack.hostTempo.positionSeconds,
+            bpm: rack.hostTempo.bpm, recordArmed: rack.hostTempo.recordArmed)
+        if next != transportReadout { transportReadout = next }
+        if next == nil {
+            transportTicker?.invalidate()
+            transportTicker = nil
+        } else if transportTicker == nil {
+            transportTicker = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.refreshTransportReadout() }
+            }
+        }
+    }
+
+    func stepStudioBank(_ direction: Int) {
+        let target = StudioTrackSelection.bankTarget(
+            selected: rack.selected, trackCount: rack.slots.count, direction: direction)
+        guard target != rack.selected else { return }
+        studioSelection.cancel()
+        surfaceGainPickup.reset()
+        select(target)
     }
 
     /// トラックの gain を直接設定する（Track 面のスライダー）
@@ -1396,7 +1467,6 @@ final class AppState: ObservableObject {
         slot.knobMappings = entry.knobs
         rotoColors.trackCells[slot.index] = entry.cellColors.isEmpty ? nil : entry.cellColors
         knobMappingsChanged()  // ルーティング + 常時保存
-        scheduleRotoLiveBurn()  // INST 冊のラベル・席色が変わる
     }
 
     /// default 一式（page-defaults.kdl）を書き出す（mako 要望 2026-08-14
@@ -1566,6 +1636,8 @@ final class AppState: ObservableObject {
         snapshot.pedalInverted = pedalInverted
         snapshot.synthInput1Slot = synthInput1Slot
         snapshot.secondKeyboardSlot = secondKeyboardSlot
+        snapshot.miniLabSlot = miniLabSlot
+        snapshot.lpd8KnobJack = lpd8KnobJack.rawValue
         snapshot.theme = ThemeStore.shared.persistedValue
         snapshot.keystage = encodedKeystageSettings
         snapshot.rotoColors = (try? JSONEncoder().encode(rotoColors))
@@ -1610,6 +1682,10 @@ final class AppState: ObservableObject {
                 }
                 if let synth = partial.synthInput1Slot { synthInput1Slot = synth }
                 if let second = partial.secondKeyboardSlot { secondKeyboardSlot = second }
+                if let mini = partial.miniLabSlot { miniLabSlot = mini }
+                if let jack = partial.lpd8KnobJack.flatMap(Lpd8KnobJack.init(rawValue:)) {
+                    lpd8KnobJack = jack
+                }
                 if let keystage = partial.keystage,
                    let decoded = try? JSONDecoder().decode(
                        KeystageSettings.self, from: Data(keystage.utf8)) {
@@ -1761,6 +1837,7 @@ final class AppState: ObservableObject {
 
         // ROTO の面も塗り直す（選択・ロード・割当の変更はすべてここを通る）
         roto.refresh()
+        scheduleRotoLiveBurn()
         // Keystage のノブ OLED も同じ内容で（mako 依頼 2026-08-09）
         refreshKeystageDisplay()
 
@@ -1781,6 +1858,19 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 secondController.handle(knob: Int(cc), value127: Int(value))
                 self?.scheduleAutosave()  // [常時保存 25] 鍵盤 2 の顔つまみ
+            }
+        }
+
+        let miniSlot = miniLabSlot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil } ?? slot
+        router.setSecondKeyboardTarget(miniSlot.audioUnit as? AVAudioUnitMIDIInstrument, input: .miniLab)
+        miniLabFaceKnobs.focus(miniSlot)
+        let miniCCs = Set(miniSlot.knobMappings.compactMap { UInt8(exactly: $0.knob) })
+            .intersection(secondReachable)
+        let miniController = miniLabFaceKnobs
+        router.setSecondKnobRouting(input: .miniLab, ccs: miniCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                miniController.handle(knob: Int(cc), value127: Int(value))
+                self?.scheduleAutosave()
             }
         }
 
@@ -1808,6 +1898,21 @@ final class AppState: ObservableObject {
                 self?.scheduleAutosave()  // [常時保存 18] LPD8 顔つまみ
             }
         }
+        // LPD8 ノブ → **選択 Track の顔つまみ**（`Lpd8KnobJack.face`。Keystage の
+        // ノブ帯の代役 — 位置 i → 現ページの席 i、席は `faceKnobs` と共有なので
+        // ピックアップも同じ帳簿）。drums なら空集合 = 上の従来経路だけが効く
+        let faceCCs = lpd8KnobJack == .face ? Lpd8FaceKnobs.interceptedCCs(current: lpd8KnobCCs) : []
+        let currentKnobCCs = lpd8KnobCCs
+        router.setLpd8FaceRouting(ccs: faceCCs) { [weak self] cc, value in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let page = self.activeKnobPage ?? self.rotoPage
+                guard let seat = Lpd8FaceKnobs.seat(forCC: cc, current: currentKnobCCs, page: page)
+                else { return }
+                controller.handle(knob: seat, value127: Int(value))
+                self.scheduleAutosave()  // [常時保存 27] LPD8 → 顔つまみ
+            }
+        }
 
         NSLog(
             "routing: keyboard → slot %d (%@), drums → %@, knobs: %d mapped",
@@ -1820,8 +1925,5 @@ final class AppState: ObservableObject {
         // focus pane を選択に追従させる（選択・ロード・入替の全経路がここを通る）
         refreshFocusPane()
 
-        // ROTO の差分焼きも相乗り — 選択・ロード・入替・割当変更の全経路が
-        // ここを通る = INST 冊のライブラベルが変わりうる節目そのもの
-        scheduleRotoLiveBurn()
     }
 }

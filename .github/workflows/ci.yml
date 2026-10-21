@@ -46,6 +46,15 @@ jobs:
       - name: ツールチェーンを記録
         run: swift --version
 
+      # Homebrew の rustup を使う。対話シェルの mise / cargo shim に依存しない。
+      - name: Rustup を PATH に追加
+        run: echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+
+      # SDK の固定 checkout から fake server を作り、通常は無効な transport 回帰も必ず実行する。
+      # nativeMIDI=false / テストごとの一時 state。実機・常駐 daemon は使わない。
+      - name: ROTO midistage interop
+        run: ./scripts/test-roto-midistage.sh
+
       # フルマトリクス（3 モード + release ビルド）。定義は scripts/test-matrix.sh が正典
       - name: test-matrix
         run: ./scripts/test-matrix.sh

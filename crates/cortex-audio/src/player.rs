@@ -51,7 +51,7 @@ impl AudioPlayer {
         let config = device
             .default_output_config()
             .map_err(|e| WaveError::Audio(format!("Failed to get config: {}", e)))?;
-        Ok(config.sample_rate().0)
+        Ok(config.sample_rate())
     }
 
     /// オーディオ出力ストリームを初期化
@@ -80,7 +80,7 @@ impl AudioPlayer {
             .default_output_config()
             .map_err(|e| WaveError::Audio(format!("Failed to get config: {}", e)))?;
 
-        let sample_rate = supported_config.sample_rate().0;
+        let sample_rate = supported_config.sample_rate();
         let channels = supported_config.channels();
 
         self.config.sample_rate = sample_rate;
@@ -100,7 +100,7 @@ impl AudioPlayer {
 
         let stream_config = cpal::StreamConfig {
             channels,
-            sample_rate: cpal::SampleRate(sample_rate),
+            sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 

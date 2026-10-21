@@ -23,6 +23,26 @@ public enum MIDISysExError: Error, CustomStringConvertible {
 }
 
 public enum MIDISysExSender {
+    private static let accessLock = NSLock()
+    private static var inputAccess: (@Sendable (String) -> Bool)?
+    private static var outputAccess: (@Sendable (String) -> Bool)?
+    /// アプリが所有する仮想ポートに限定する。未設定の独立 RigBench は従来どおり。
+    public static func setEndpointAccess(input: (@Sendable (String) -> Bool)?, output: (@Sendable (String) -> Bool)?) {
+        accessLock.lock(); defer { accessLock.unlock() }
+        inputAccess = input
+        outputAccess = output
+    }
+    public static func isAllowed(name: String, input: Bool) -> Bool {
+        accessLock.lock()
+        let check = input ? inputAccess : outputAccess
+        accessLock.unlock()
+        return check?(name) ?? true
+    }
+    public static func isAllowed(endpoint: MIDIEndpointRef, input: Bool) -> Bool {
+        guard let name = displayName(of: endpoint) else { return false }
+        return isAllowed(name: name, input: input)
+    }
+
     public static func makeClient(_ name: String) throws -> MIDIClientRef {
         var client = MIDIClientRef()
         let status = MIDIClientCreate(name as CFString, nil, nil, &client)
@@ -32,17 +52,18 @@ public enum MIDISysExSender {
 
     /// 表示名の部分一致（大文字小文字無視）で MIDI 宛先を探す
     public static func destination(matching fragment: String) throws -> MIDIEndpointRef {
-        try find(fragment, count: MIDIGetNumberOfDestinations(), get: MIDIGetDestination)
+        try find(fragment, count: MIDIGetNumberOfDestinations(), get: MIDIGetDestination, input: false)
     }
 
     /// 表示名の部分一致（大文字小文字無視）で MIDI ソースを探す
     public static func source(matching fragment: String) throws -> MIDIEndpointRef {
-        try find(fragment, count: MIDIGetNumberOfSources(), get: MIDIGetSource)
+        try find(fragment, count: MIDIGetNumberOfSources(), get: MIDIGetSource, input: true)
     }
 
     /// 生の短い MIDI メッセージ（CC など）を送る。SysEx とは経路が別で、
     /// ROTO のモーター位置は**この 14bit CC**で送る（doc 20 §5）
     public static func sendRaw(_ bytes: [UInt8], to dest: MIDIEndpointRef) {
+        guard isAllowed(endpoint: dest, input: false) else { return }
         var packetList = MIDIPacketList()
         let packet = MIDIPacketListInit(&packetList)
         _ = MIDIPacketListAdd(&packetList, 1024, packet, 0, bytes.count, bytes)
@@ -67,6 +88,7 @@ public enum MIDISysExSender {
         to dest: MIDIEndpointRef,
         completion: (@Sendable (_ latencyMs: Double) -> Void)? = nil
     ) {
+        guard isAllowed(endpoint: dest, input: false) else { return }
         let dataPtr = UnsafeMutablePointer<UInt8>.allocate(capacity: bytes.count)
         dataPtr.update(from: bytes, count: bytes.count)
         let ctx = RequestContext(completion: completion, data: dataPtr)
@@ -87,14 +109,14 @@ public enum MIDISysExSender {
     }
 
     private static func find(
-        _ fragment: String, count: Int, get: (Int) -> MIDIEndpointRef
+        _ fragment: String, count: Int, get: (Int) -> MIDIEndpointRef, input: Bool
     ) throws -> MIDIEndpointRef {
         var names: [String] = []
         for i in 0..<count {
             let endpoint = get(i)
             let name = displayName(of: endpoint) ?? "(unknown)"
             names.append(name)
-            if name.localizedCaseInsensitiveContains(fragment) { return endpoint }
+            if name.localizedCaseInsensitiveContains(fragment), isAllowed(name: name, input: input) { return endpoint }
         }
         throw MIDISysExError.endpointNotFound(fragment, available: names)
     }

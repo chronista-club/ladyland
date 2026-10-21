@@ -1,6 +1,6 @@
 # ROTO-CONTROL SysEx protocol — ladyland 実装ノート
 
-> **Status**: PLUGIN モード recall フロー**実機開通**（2026-08-03、firmware 3.2.0 dcf8018）
+> **Status**: PLUGIN モード recall フロー**実機開通**（2026-08-03、firmware 3.2.0 dcf8018）。実機は 2026-10-18 から firmware 3.3.0 eaa37b0
 > **実装**: `ladyland/Sources/RigBench/RotoProtocol.swift` / 実験: `RigBench roto-probe`
 > **先行調査**: vantage-point doc 20（2026-06-12）。本ノートはその**誤読 2 点を訂正**し、
 > ROTO-SETUP.app 同梱の一次資料で全コマンドを裏取りした決定版。
@@ -8,6 +8,23 @@
 > **姉妹編**: 設定の読み書き（MIDI setup / PLUGIN 資産 / setup 切替）は SysEx では
 > なく **USB CDC シリアルのアドミンポート**を通る — [admin-port.md](admin-port.md)
 > （ROTO-SETUP の app.asar 解剖、2026-08-12）。
+
+## 公式仕様（2026-10-16 公開を確認）
+
+Melbourne Instruments が仕様と公式統合のソースを公開した:
+[github.com/Melbourne-Instruments/roto_control](https://github.com/Melbourne-Instruments/roto_control)
+（SysEx API v1.6 = ROTO-SETUP 3.0.1〜3.2.0、Serial API v1.3、Ableton / Bitwig / Logic のソース）。
+PDF の控えは `ladyland-gear-docs/roto-control/`。**以下の逆解析ノートより公式が強い** — 食い違ったら公式に寄せる。
+v1.6 で増えた、Ladyland に効くもの:
+
+- `0A 18` SHOW CONTROL VALUE — ノブの画面に値の文字列（0D バイト）を一時表示、時間が経つと名前に戻る
+- `0C 0B` SET MIX VU METER THRESHOLDS + VU レベルは **ch16 CC65〜80**（MIX トラック 1〜8 の L/R）、CC64 = 0 dB 基準。
+  §「VU メーター」の 8 月の試行で送っていた `0C 0C`（有効化）は **v1.6 に存在しない**
+- Appendix B: MIX / PLUGIN の CC 地図（ノブ 12〜19 + 44〜51 の 14bit、スイッチ 20〜27、TRANSPORT 28〜35、タッチ 52〜59）
+
+**firmware**: 2026-10-18 に 3.2.0 dcf8018 → **3.3.0 eaa37b0**（ROTO-SETUP 3.3.0）。変更は LEARN / CLEAR の手順と
+LEARN 中のタッチ感度のみ。名前付き setup 4 冊（MIXER− / MIXER+ / TR3− Lisbon / TR3+ Lisbon）は更新後も保持。
+更新前の EXPORT ALL は `backups/ROTO-CONTROL 2026-10-16 16.46.49`。
 
 ## 一次資料（この順で強い）
 

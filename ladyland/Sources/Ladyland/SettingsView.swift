@@ -19,6 +19,8 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            MIDIUseSettingsView(session: appState.midiUse)
+                .tabItem { Label("MIDI 機材", systemImage: "pianokeys") }
             AudioOutputSettingsView()
                 .tabItem { Label("オーディオ出力", systemImage: "speaker.wave.2") }
             Lpd8SettingsView()

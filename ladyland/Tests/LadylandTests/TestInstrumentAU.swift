@@ -78,6 +78,14 @@ final class TestInstrumentAU: AUAudioUnit, @unchecked Sendable {
             if renderResourcesAllocated { musicalContextSetsWhileRendering += 1 }
         }
     }
+    private(set) var transportStateSets = 0
+    private(set) var transportStateSetsWhileRendering = 0
+    override var transportStateBlock: AUHostTransportStateBlock? {
+        didSet {
+            transportStateSets += 1
+            if renderResourcesAllocated { transportStateSetsWhileRendering += 1 }
+        }
+    }
     override var outputBusses: AUAudioUnitBusArray { buses }
     override var parameterTree: AUParameterTree? {
         get { parameters }

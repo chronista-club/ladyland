@@ -74,7 +74,7 @@ struct MidiTraceFormatTests {
             .knob(cc: 3, value: 90), selectedSlot: "slot 1 (A)", drumSlot: "drums (B)")
         #expect(line.key == "knob-3")
         #expect(line.text.contains("CC3"))
-        #expect(line.text.contains("顔つまみ"))
+        #expect(line.text.contains("Track ノブ"))
     }
 
     @Test("ノートオンは畳まれない（key = nil）・送り先名が入る")

@@ -33,8 +33,9 @@ Jack は 2 つの面を持つ:
 
 | Jack | 要求する能力 | 束縛 | 現状の実体(読み替え) |
 |---|---|---|---|
-| **シンセ入力 1** | 鍵盤(Note + vel) | 担当 Track(nil=追従) | keyboard 経路(Keystage / PC-KB) |
-| **シンセ入力 2** | 鍵盤 | 担当 Track(nil=追従) | secondKeyboard 経路(MiniLab / NCXse) |
+| **シンセ入力 1** | 鍵盤(Note + vel) | 担当 Track(nil=追従) | keyboard 経路(Keystage / PC-KB / **Keystage 不在時の汎用鍵盤**) |
+| **シンセ入力 2** | 鍵盤 | 担当 Track(nil=追従) | secondKeyboard 経路(MiniLab / NCXse / **Keystage 在席時の汎用鍵盤**) |
+| **Track ノブ** | 連続値ノブ × 8 | 選択 Track(現ページの席 8) | Keystage のノブ帯 / **LPD8 ノブ 8(`Lpd8KnobJack.face`)** / ROTO SMART |
 | **サンプラ打面** | パッド(Note + vel) | drums 固定 | drums 経路(LPD8) |
 | MIXER(v2) | 連続値ノブ × N | 全 Track の gain | ROTO MIXER 冊(焼き)/ MiniLab ノブ 16(未配線) |
 | ナビ/選択(整理のみ) | 相対エンコーダー/ボタン | カーソル | VALUE エンコーダー / RK / REW-FF |
@@ -46,3 +47,29 @@ Jack は 2 つの面を持つ:
 - **v1 の刺し替えは設営時のみ**(曲中の動的刺し替えは将来)
 - 移行は**漸進**: 既存経路(keyboard/secondKeyboard/drums)は Jack の実体として
   そのまま生きる。接続表のデータ化(パッチベイ)は v2 以降
+- **未知の鍵盤は捨てない**(mako 裁定 2026-09-26「スタジオにある MIDI 鍵盤を
+  Keystage の代わりに」— 鍵盤の持ち運びが大変。PC + 小さな機材で動けるように):
+  名前の分からない source は Keystage 不在ならシンセ入力 1、居ればシンセ入力 2 に
+  **自動で刺さる**(設定なし)。ROTO / IAC / Network は鍵盤ではないので繋がない。
+  ⭐ **DIN しか無い鍵盤は Zenith 2 の MIDI IN 経由で入る**(source 名は
+  「Zenith 2」— mako 2026-10-01「MIDI IN/OUT が 1 ポートセットである」)。
+  名前不明扱いなので USB 鍵盤と同じ道で刺さる。何も挿していなければ黙っているだけ
+- **LPD8 のノブ 8 は Jack で刺し替える**(drums / Track ノブ。同日裁定)。Track ノブの
+  ときは位置 i → 現ページ(`activeKnobPage ?? rotoPage`)の席 i。ページを LPD8 の
+  PROG 番号で分ける案は不採用 — PROG はパッド用のまま、ページは ROTO / GUI に追従
+- **呼び名は「Track ノブ」**(mako 2026-10-04「顔つまみをそもそも変えたいね。
+  わかりづらい」)。選択中の Track のパラメータを 8 ノブ × 8 ページで動かす席。
+  画面の文字だけ変え、コードの識別子(`faceKnobs` / `FaceKnobMapping`)と保存値
+  (`Lpd8KnobJack.face` = `"face"`)はそのまま
+- **Jack 面の広い版は机だけ**(同日「統一させて一つのビューに情報まとめよう」)。
+  机は**物理層の上に仮想層を重ねる場所** — 機材の板(物理)にソケット、
+  ケーブル・プラグの札・ノブのパラメータ名(仮想)、奥の Mixer(仮想機材)。
+  Jack の箱は置かず、ケーブルは担当 Track のストリップ(ドラムは DRUMS)へ直接届く。
+  プラグを掴んで落とす = 刺し替え。板の無い機材は左の棚
+- **3D の机 — 部品を機材に「載せる」で結線する**(mako 2026-10-04「ジャックの部分を
+  フル 3D できっちりモデリングした機材を画面に出して、その上に例えばナノコントロール 2
+  の上にミキサーを置くみたいな感じでコネクトできるようにしたい」)。
+  **載せられるか = Jack の契約**: 8ch Mixer は「フェーダー × 8」、Track ノブは
+  「ノブ × 8」を要求し、満たすセクションにだけ載る。載せた部品が実機の CC の意味を
+  決める(Mixer を載せた nanoKONTROL2 のフェーダー = バンクの音量、同じ列の M = ミュート)。
+  nanoKONTROL2 は鍵盤扱いせず「操作面」の経路で受ける

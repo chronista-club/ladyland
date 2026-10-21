@@ -107,3 +107,27 @@ struct HostTempoTests {
         #expect(try ask(unit).1 == 110)
     }
 }
+
+@Suite("transport の口", .serialized)
+@MainActor
+struct HostTransportBlockTests {
+    init() { TestInstrumentAU.register() }
+
+    @Test("transport の口もテンポと同じく render の資源を持つ前に 1 回だけ渡り、稼働中は moving")
+    func transportBlockSetOnceAndMoving() async throws {
+        let rack = InstrumentRack()
+        try rack.start()
+        defer { rack.engine.stop() }
+        rack.engine.mainMixerNode.outputVolume = 0.02
+        let tone = try await TestInstrumentAU.component(in: rack)
+        try await rack.load(tone, into: rack.slots[0])
+        let unit = try #require(rack.slots[0].audioUnit?.auAudioUnit as? TestInstrumentAU)
+
+        #expect(unit.transportStateSets == 1)
+        #expect(unit.transportStateSetsWhileRendering == 0)
+        let block = try #require(unit.transportStateBlock)
+        var flags = AUHostTransportStateFlags()
+        #expect(block(&flags, nil, nil, nil))
+        #expect(flags.contains(.moving), "エンジンが回っている = 再生中")
+    }
+}

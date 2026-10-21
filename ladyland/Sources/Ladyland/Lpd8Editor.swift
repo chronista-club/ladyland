@@ -77,6 +77,14 @@ final class Lpd8EditorModel: ObservableObject {
     /// タイムアウト世代（古いタイマーの発火を無効化する）
     private var generation = 0
     private var pendingWrite: Lpd8Program?
+    private var burnTask: Task<Void, Never>?
+
+    func releaseDevice() {
+        burnTask?.cancel()
+        burnTask = nil
+        deviceCopy = nil
+        fail("機材の使用を解除しました。再開時は実機を読み直してください。")
+    }
 
     // MARK: - read / write
 
@@ -128,12 +136,14 @@ final class Lpd8EditorModel: ObservableObject {
         // `beginSysEx` も応答受信も `generation += 1` するので、**正常な進行でも
         // 必ず食い違う** — 1 周目の `read()` で進み、2 周目の頭で「割り込まれた」と
         // 誤判定して中断していた。多重起動は入口の `phase` ガードで防ぐ
-        Task { @MainActor in
+        burnTask = Task { @MainActor in
             for program in 1...4 {
+                guard !Task.isCancelled else { return }
                 NSLog("lpd8: PROG %d — 読み込み", program)
                 self.selectedProgram = program
                 self.read()
                 guard await self.waitForSettled() else {
+                    guard !Task.isCancelled else { return }
                     NSLog("lpd8: ⚠️ PROG %d の読み込みで止まった（phase=%@）",
                         program, String(describing: self.phase))
                     self.phase = .error("PROG \(program) の読み込みで止まった")
@@ -146,6 +156,7 @@ final class Lpd8EditorModel: ObservableObject {
                     "\(Lpd8DefaultKnobCCs.byProgram[program - 1].first ?? 0)-")
                 self.write()
                 guard await self.waitForSettled() else {
+                    guard !Task.isCancelled else { return }
                     NSLog("lpd8: ⚠️ PROG %d の書き込みで止まった（phase=%@）",
                         program, String(describing: self.phase))
                     self.phase = .error("PROG \(program) の書き込みで止まった")
@@ -157,6 +168,7 @@ final class Lpd8EditorModel: ObservableObject {
                 }
                 NSLog("lpd8: PROG %d 完了", program)
             }
+            guard !Task.isCancelled else { return }
             NSLog("lpd8: 4 プログラム全部を焼き終えた")
             self.phase = .verified
         }
@@ -181,7 +193,7 @@ final class Lpd8EditorModel: ObservableObject {
     private func waitForSettled(timeoutMs: Int = 5000) async -> Bool {
         var waited = 0
         var started = false
-        while waited < timeoutMs {
+        while waited < timeoutMs, !Task.isCancelled {
             switch phase {
             case .reading, .writing, .verifying:
                 started = true  // 動き出した

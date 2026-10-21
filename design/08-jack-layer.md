@@ -33,12 +33,97 @@ engine 層  64 スロット / drums / master
 | keyboardPort / keyboardTarget | シンセ入力 1 の実体 |
 | secondKeyboardPort / secondKeyboardTarget | シンセ入力 2 の実体 |
 | drumsPort / drumsTarget | サンプラ打面の実体 |
-| `connectSources()` の名前分岐 | 接続表(v1 はハードコードのまま) |
+| `MIDIInput.route(forSourceName:hasKeystage:)` / `plan(sourceNames:)` | 接続表(純関数。未知の名前 → 汎用鍵盤) |
+| `MIDIRouter.KeyboardOrigin`(keystage / generic) | keyboard 経路の**出どころの印** — 帳簿(latch / 和音)は共有、Keystage 専用の解釈(帯の飲み込み / PC ナビ / 焼きボタン / ch16)は keystage だけ。generic は鍵盤 2 と同じ通行証 + CC120 |
+| `Lpd8KnobJack`(drums / face)+ `Lpd8FaceKnobs` | LPD8 ノブ 8 の刺し先。face は 4 プログラム分の CC を全部飲み、位置 → 現ページの席 → `faceKnobs`。snapshot `lpd8Knobs jack=` / DB `lpd8KnobJack`(v12) |
 | `secondKeyboardSlot` / `synthInput1Slot` | 各シンセ入力 Jack の束縛 |
 
 ## 4. 段階
 
-1. **v1(今回)**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1. **v1**: synthInput1Slot + UI + 永続化 — モデルの本丸、既存挙動は nil で不変
+1j. **機材の模型は midistage が正本(2026-10-14、mako「midistage に集めるか。3D モデルも。」→「C で」)**:
+    機材の形・実寸・操作子の対応は機材の事実なので、`Gear/<id>.json` / `gear_build.py` /
+    `nanokontrol.py` / `assets/blender/gear/<id>.blend` を midistage の `gear/<id>/`
+    (`gear.json` = 意味の層、`<id>.blend` = 見た目の層。midistage docs/design/04)へ移し、ここから削除した。
+    アプリは `~/Library/Application Support/midistage/gear/` の `<id>.usdz` / `<id>.json` を優先して読み
+    (`GearAssets`、無ければ従来の置き場)、studio.blend は同じ置き場の `<id>.blend` をリンクする。
+    `studio_export.py` は机・棚・環境光・配置だけを書く。機材 ID は inventory に揃え `fgdp50` → `fgdp`、
+    `ncxse` → `numa`(配置の旧 ID は `GearAssets.lookup` が読み替える)。以下 1e〜1i の
+    `Gear/<id>.json`・`gear_build.py`・`assets/blender/gear/` は当時の置き場
+1i. **編集した studio をアプリへ(2026-10-07)**: `assets/blender/scenes/studio.blend` を
+    配置の正本にする。`Gear/studio_export.py` が静的家具 `desk.usdz`、機材ごとの USDZ、
+    環境光、配置 JSON を書く。編集済みメッシュを再生成・上書きしない。
+    `DeskLayout` は棚の高さ、機材の Y 軸回転、実寸の高さ、置き場の高さ、平行投影を読む。
+    省略時は従来の高さ 0・回転 0・透視投影。Blender `(x,y,z)` m → アプリ `(x,z,-y)` m。
+    載せ先判定は画面の光線を各機材の天面へ投影して機材ローカルへ逆変換する。
+    帯は機材ローカルに組み、機材と同じ高さ・向きへ置く。フェーダーの奥も機材の向きに従う。
+    機材・家具の USDZ と JSON は同じ書き出し単位で配置する。旧アプリの実行中に
+    高さ付き JSON だけを入れ替えない。未対応の傾斜・拡縮・レンズシフトは書き出しで拒否する。
+1h. **X-TOUCH を追加(2026-10-06)**: 標準の 452 × 301 × 100 mm モデル。
+    `Gear/xtouch.json` に 8 チャンネル＋マスターの 100 mm フェーダー、8 エンコーダー、
+    液晶、メーター、トランスポート、ジョグを定義する。筐体の傾斜と背面端子は簡略化。
+    机を横に広げて左側へ置く。フェーダー 8 本とノブ 8 個は別セクションとし、
+    MCU/HUI の MIDI 制御は接続しない（CC は空）。`.blend` は `assets/blender/gear/`、リンク配置した空間は
+    `assets/blender/scenes/studio.blend` で管理する。USDZ はアプリの Application Support に置く。
+1g. **机に 7 台(2026-10-05、mako「3D の机に全部載せて」)**: 並びは `Gear/desk_layout.json`
+    (アプリと Blender の両方が読む。机の大きさ・各機材の中心・部品の置き場・カメラ)。
+    `gear_build.py` は USDZ と一緒に配置データ(JSON、鍵盤は展開済み)を書き出し、アプリは
+    `GearBlueprint.decode` で部品とセクションを読む(nanoKONTROL2 だけ Swift の下書き)。
+    部品は「機材 id / 部品名」で引く(knob_1 などは機材をまたいで重なる)。帯は載った先ごとに
+    作り直す。Track ノブは 8 本以上のノブ列ならどれにも載り、LPD8 のノブ列に載せる / 外すと
+    `lpd8KnobJack` も face / drums に切り替わる。MIDI の意味まで繋がっているのは nanoKONTROL2
+    (操作面)と LPD8 のノブ(刺し先)だけ — ほかは載せて形を見る段階
+1f. **見た目は Blender で決める(2026-10-04、方針「A + AO」)**: mako「見た目の雰囲気は、
+    ここでしっかり落とし込む。各クライアントは微調整くらい」。`Gear/look.py` が
+    ソフトボックス(発光する板)とワールドを組み、機材の位置から全周を Cycles で撮って
+    `environment.exr` に、机の接地の暗がりと筐体の隙間を AO で焼いて色に合成し
+    `desk.usdz` / `nanokontrol.usdz` に書く。アプリは環境マップで照らし
+    (`ImageBasedLightComponent`)、足すのは `exposure` の微調整だけ。
+    ⚠️ RealityKit は USD の中のライトを読まない(光は画像で運ぶ)/ 焼いた色は sRGB で書く
+    (線形のままだと約 1/10 の明るさ)/ USD の Preview Surface は Base Color に画像が
+    直結した形しか運ばない(Mix 節点は落ちる)ので、色 × AO は画像に合成してから繋ぐ
+1e. **3D の机(2026-10-04)**: RealityKit(`Desk3DView`、macOS 15 へ引き上げ)。
+    `Gear3D.swift`(純関数)— `GearBlueprint`(実寸 mm の下書き。可動部は名前付き部品
+    `fader_1` 等)、`VirtualComponent.canDock`(Jack の契約)、`DockModel`(落とした点 →
+    セクション、載せ替え)、`SurfaceMapping`(実機の CC → 載せた部品の操作)。
+    載せ先は window.json の `docks`。清書は Blender → `~/Library/Application Support/
+    ladyland/gear/<id>.usdz` に置けば下書きの代わりに読む(部品は同じ名前で掴む)。
+    nanoKONTROL2 の模型は `ladyland/Gear/nanokontrol.py`(Blender スクリプト。Blender
+    MCP からも流せる)で組んで書き出す。USDZ では部品名が入れ物(Xform)と形(Mesh)の
+    2 段になるので、材質を替えるときは子の形まで辿る(`Desk3DScene.model(of:)`)
+1d. **結線図を机に畳む(2026-10-04)**: `DeskGraph`(純関数)が結線図の行 →
+    ソケット(板 or 棚)、ケーブルの行き先(`CableTarget`)、プラグの札、
+    落とした場所 → 刺し替え(`DeskRebind`)、LPD8 ノブに重ねる割当名を持つ。
+    `MixerView(includeDrums:)` がストリップのアンカー(`DeskAnchorKey`)を出し、
+    机はそこへケーブルを描く。⚠️ 板は傾けない — `rotation3DEffect` の遠近は
+    当たり判定が元の位置に残る(実機 2026-10-01)。遠近は床と縮尺で出す
+1c. **机 = 2.5D の Jack(2026-10-01、mako 赤入れ)**: Jack 面の広い版に、結線図の
+    下として机を置く。`Desk.swift`(配置モデル、0-1 の机座標、window.json の
+    `desk`)+ `DeskView`(`rotation3DEffect` の板に既存部品を乗せる)。操作は
+    実機と同じ入口(`routeKeyboard` / `routeDrums`)。RealityKit への置き換えは
+    配置モデルを残したまま描画だけ差し替える前提
+1b. **汎用鍵盤 + LPD8 顔つまみ(2026-09-26)**: 接続表を純関数に切り出し、未知の
+    鍵盤を自動で刺す。LPD8 ノブ 8 を「顔つまみ」Jack に刺し替えられる(Jack 面の
+    LPD8 ノブ行の切替)。Jack 面の行は機材のセクション単位(Keystage 鍵盤 / ノブ 8、
+    LPD8 パッド / ノブ 8)になり、汎用鍵盤は名前で行が生える
 2. v2: MiniLab ノブ 16 → MIXER Jack(新経路 — gain の手元操作、ROTO MIXER 冊の対)
 3. v3: 接続表のデータ化 + パッチベイ UI(機材セクション × Jack のマトリクス)
 4. v4: 配役シーン(接続 + 束縛のスナップショット保存/呼出 — Page 既定と同じ文法)
+
+### 2026-10-07: スタジオで Track の入力元を選ぶ
+
+nanoKONTROL2 の 8 列を現在の 8 Track バンクに対応させる。Mixer を
+nano のフェーダー列へ載せると、フェーダーは音量、M はミュート、S は
+Track 選択と入力候補の表示になる。その列のノブで Numa / Keystage /
+MiniLab を選び、同じ S でもう一度押して担当 Track を確定する。
+別の S は前の候補を破棄し、バンク移動と画面の取消も候補を破棄する。
+候補状態は保存しない。画面の 8 Track パネルでも同じ操作ができる。
+
+鍵盤ごとに担当 Track は一つ。別 Track への確定は接続の移動になる。
+複数の鍵盤が同じ Track を担当することはできる。未固定は従来どおり
+選択 Track へ追従し、画面では ↗ を付ける。Numa と MiniLab は受信元、
+送り先、ノート帳簿、ModWheel 等のパラメータ駆動を分離する。
+SQLite v13 は従来の共有固定先を MiniLab にも引き継ぐ。
+
+アプリの CC 割当は S=32–39、入力候補ノブ=16–23、バンク前後=58/59。
+これは CC モードの割当契約。実機の変更済みプリセットは別途確認する。
