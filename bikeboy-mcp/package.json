@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "surrealdb": "^2.1.0"
+    "surrealdb": "^2.1.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
