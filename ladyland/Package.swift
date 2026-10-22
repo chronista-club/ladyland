@@ -10,6 +10,7 @@ let package = Package(
         .macOS(.v15)
     ],
     dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
         .package(url: "https://github.com/chronista-club/midistage.git", revision: "fc9360edc2e31aa19eafa08dc35e716892517ef8"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
@@ -57,6 +58,7 @@ let package = Package(
                 "Lpd8Kit",
                 "RotoKit",
                 "KeystageKit",
+                .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "MidistageClient", package: "midistage"),
                 .product(name: "CreoUI", package: "swift"),
                 .product(name: "UnisonClient", package: "club-unison"),

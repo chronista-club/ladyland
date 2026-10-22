@@ -24,7 +24,7 @@ scripts/build-app.sh --dist
 # → dist/Ladyland-v0.1.0.dmg
 
 scripts/build-app.sh --publish
-# → 同じことをして、その tag の GitHub Release に DMG を添付する
+# → 同じことをして、その tag の GitHub Release に DMG と appcast.xml を添付する
 #    （Release が無ければ作る。HEAD が tag の上・作業ツリーが clean・gh 認証済み、が前提）
 ```
 
@@ -41,6 +41,39 @@ scripts/build-app.sh --publish
 5. **staple** — 結果をアプリ本体に貼る。相手がオフラインでも検証が通る
 6. **DMG** — 「Applications へドラッグ」の見慣れた形にする
 7. **DMG も署名 → 公証 → staple**（中の .app だけだと Gatekeeper の `-t install` 検証で蹴られる）
+8. `--publish` なら **EdDSA 署名付き appcast.xml を生成し、DMG と一緒に添付**
+
+### アプリ内更新（Sparkle 2）
+
+Ladyland メニューの「アップデートを確認…」から公開版を確認できる。
+一日一回の定期確認で更新が見つかったときは、フッターに「更新あり」と表示する。
+勝手にダイアログを開いたり、ダウンロード・適用・再起動したりはしない。
+演奏が終わってから更新を開き、Sparkle の画面で適用を選ぶ。
+
+**v0.3.0 には updater がないため、Sparkle 入りの最初の版だけ手動インストールが必要。**
+その次の版からアプリ内更新を使える。配布側は Latest の Release に DMG と `appcast.xml` を
+揃えること。`--publish` の代わりに DMG だけを手で添付すると、更新確認が失敗する。
+
+署名鍵の正本は 1Password の **Engineering / ladyland — Sparkle EdDSA signing key** の password。
+この Mac には login Keychain の account `ladyland` として取り込み済み。
+別のビルド Mac では `swift package resolve`（`ladyland/` 内）で Sparkle を取得した後、
+1Password から秘密鍵を権限 600 の一時ファイルへ取り出し、次で取り込む。
+
+```bash
+ladyland/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account ladyland -f /path/to/protected-key-file
+ladyland/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account ladyland -p
+```
+
+取り込み後は一時ファイルを削除する。`-p` が表示する公開鍵と `scripts/build-app.sh` の
+`SPARKLE_PUBLIC_KEY` が一致することを確認する。鍵を勝手に再生成しない。
+コードには公開鍵だけを置き、秘密鍵をログや共有資料へ載せない。
+
+ビルドした `.app` は起動せずに検査できる（CI でも実行する）。
+
+```bash
+scripts/build-app.sh
+python3 scripts/test-app-bundle.py
+```
 
 ## なぜ公証が要るのか
 
@@ -82,6 +115,6 @@ Developer ID で署名しただけでは足りない。ダウンロードや Air
 
 ## バージョン
 
-`CFBundleVersion` は git から自動採取（コミット数.短縮ハッシュ）。
-`CFBundleShortVersionString` は直近の git タグ（無ければ `0.1.0`）。
+`CFBundleVersion` は git のコミット数（Sparkle の比較用）。短縮ハッシュは `LadylandCommit`。
+`CFBundleShortVersionString` は直近の git タグから `v` を除いた版（無ければ `0.1.0`）。
 配布のたびにタグを切ると、相手に「どれを渡したか」が伝わる。

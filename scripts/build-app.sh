@@ -19,7 +19,7 @@
 #   scripts/build-app.sh --install    # さらに /Applications へ配置
 #   scripts/build-app.sh --run        # 作ってそのまま起動
 #   scripts/build-app.sh --dist       # 配布物を作る（公証 + staple + DMG）
-#   scripts/build-app.sh --publish    # --dist + その tag の GitHub Release へ DMG を添付
+#   scripts/build-app.sh --publish    # --dist + その tag の Release へ DMG と署名付き appcast を添付
 #   scripts/build-app.sh --reinstall  # 開発の輪: 終了 → ビルド → 差し替え → 起動
 #
 # --publish は **HEAD が tag の上にあるとき**だけ通す（`git describe --exact-match`）。
@@ -51,6 +51,11 @@ DIST="$REPO_ROOT/dist"
 APP="$DIST/Ladyland.app"
 CONTENTS="$APP/Contents"
 NOTARY_PROFILE="${LADYLAND_NOTARY_PROFILE:-ladyland}"
+SPARKLE_BIN="$PACKAGE_DIR/.build/artifacts/sparkle/Sparkle/bin"
+SPARKLE_ACCOUNT="ladyland"
+# 秘密鍵の正本は 1Password（Engineering）。ビルド Mac は login Keychain に取り込む。
+SPARKLE_PUBLIC_KEY="ZZoBmytC4vFPIV5Od+PLOFVX0bdp5pBOVTGVsDbxkvc="
+FEED_URL="https://github.com/chronista-club/ladyland/releases/latest/download/appcast.xml"
 
 INSTALL=0
 RUN=0
@@ -116,13 +121,24 @@ fi
 # バージョンは git から採る（タグが無ければコミット数 + 短縮ハッシュ）
 cd "$REPO_ROOT"
 SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo "0.1.0")"
-BUILD_VERSION="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
+# Sparkle の版比較には単調増加する整数を使う。commit は別のキーへ。
+BUILD_VERSION="$(git rev-list --count HEAD)"
+BUILD_COMMIT="$(git rev-parse --short HEAD)"
 
 echo "==> release ビルド"
 cd "$PACKAGE_DIR"
 swift build -c release --product Ladyland
-BINARY="$(swift build -c release --product Ladyland --show-bin-path)/Ladyland"
+BIN_DIR="$(swift build -c release --product Ladyland --show-bin-path)"
+BINARY="$BIN_DIR/Ladyland"
 test -x "$BINARY" || { echo "バイナリが見つかりません: $BINARY" >&2; exit 1; }
+test -d "$BIN_DIR/Sparkle.framework" || { echo "Sparkle.framework がありません" >&2; exit 1; }
+if [ "$PUBLISH" = "1" ]; then
+    SIGNING_PUBLIC_KEY="$("$SPARKLE_BIN/generate_keys" --account "$SPARKLE_ACCOUNT" -p)"
+    [ "$SIGNING_PUBLIC_KEY" = "$SPARKLE_PUBLIC_KEY" ] || {
+        echo "Sparkle の署名鍵がアプリの公開鍵と一致しません。docs/distribute.md を確認してください" >&2
+        exit 1
+    }
+fi
 
 echo "==> fieldd を release ビルド（Field 常駐サーバ — アプリに同梱して
 #    Ladyland が spawn / 版違いは自動入れ替え。design/07）"
@@ -132,8 +148,10 @@ test -x "$FIELDD" || { echo "fieldd が見つかりません: $FIELDD" >&2; exit
 
 echo "==> バンドルを組む"
 rm -rf "$APP"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$CONTENTS/Frameworks"
 cp "$BINARY" "$CONTENTS/MacOS/Ladyland"
+ditto "$BIN_DIR/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/Ladyland"
 cp "$FIELDD" "$CONTENTS/Resources/fieldd"
 
 echo "==> AppIcon を生成"
@@ -152,8 +170,16 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Ladyland</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>${SHORT_VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${SHORT_VERSION#v}</string>
     <key>CFBundleVersion</key><string>${BUILD_VERSION}</string>
+    <key>LadylandCommit</key><string>${BUILD_COMMIT}</string>
+    <key>SUFeedURL</key><string>${FEED_URL}</string>
+    <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY}</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+    <!-- 演奏中に勝手に適用しない。自動ダウンロード・終了時インストールも許可しない -->
+    <key>SUAllowsAutomaticUpdates</key><false/>
+    <key>SUAutomaticallyUpdate</key><false/>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
@@ -178,9 +204,16 @@ PLIST
 IDENTITY="${LADYLAND_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
     | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')}"
 
-if [ -n "$IDENTITY" ]; then
+if [ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ]; then
     echo "==> Developer ID で署名 + Hardened Runtime"
     echo "    $IDENTITY"
+    # Sparkle のネストした実行ファイルを内側から署名。Downloader の entitlements は保持。
+    SPK="$CONTENTS/Frameworks/Sparkle.framework/Versions/B"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPK/XPCServices/Installer.xpc"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" --preserve-metadata=entitlements "$SPK/XPCServices/Downloader.xpc"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPK/Autoupdate"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPK/Updater.app"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/Frameworks/Sparkle.framework"
     # 同梱 fieldd（ネスト実行ファイル）も個別に署名 — 公証はこれが無いと弾く
     codesign --force --options runtime \
         --sign "$IDENTITY" "$CONTENTS/Resources/fieldd"
@@ -190,9 +223,9 @@ if [ -n "$IDENTITY" ]; then
     codesign --force --options runtime \
         --entitlements "$REPO_ROOT/scripts/Ladyland.entitlements" \
         --sign "$IDENTITY" "$APP"
-    codesign --verify --strict --verbose=1 "$APP" 2>&1 | sed 's/^/    /'
+    codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | sed 's/^/    /'
 else
-    echo "==> ad-hoc 署名（Developer ID が見つからないため）"
+    echo "==> ad-hoc 署名（Developer ID 未指定、または LADYLAND_SIGN_IDENTITY=-）"
     codesign --force --deep --sign - "$APP" 2>/dev/null
 fi
 
@@ -200,13 +233,13 @@ fi
 touch "$APP"
 
 echo "==> できました: $APP"
-echo "    version ${SHORT_VERSION} (${BUILD_VERSION})"
+echo "    version ${SHORT_VERSION} (${BUILD_VERSION}.${BUILD_COMMIT})"
 
 # --------------------------------------------------------------------------
 # 配布物（公証 + staple + DMG）
 # --------------------------------------------------------------------------
 if [ "$MAKE_DIST" = "1" ]; then
-    if [ -z "$IDENTITY" ]; then
+    if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
         echo "配布には Developer ID 署名が必要です（ad-hoc では公証に出せません）" >&2
         exit 1
     fi
@@ -263,6 +296,17 @@ GUIDE
     spctl -a -t install "$DMG" 2>&1 | sed 's/^/    /' || { echo "DMG の検証に失敗" >&2; exit 1; }
 
     if [ "$PUBLISH" = "1" ]; then
+        # 生成対象を今回の DMG だけに絞る。古い dist のアプリが feed に混ざらないようにする。
+        FEED_DIR="$(mktemp -d)"
+        trap 'rm -rf "$FEED_DIR"' EXIT
+        cp "$DMG" "$FEED_DIR/"
+        "$SPARKLE_BIN/generate_appcast" --account "$SPARKLE_ACCOUNT" \
+            --download-url-prefix "https://github.com/chronista-club/ladyland/releases/download/${RELEASE_TAG}/" \
+            --link "https://github.com/chronista-club/ladyland/releases/tag/${RELEASE_TAG}" \
+            -o "$DIST/appcast.xml" "$FEED_DIR"
+        grep -q 'sparkle:edSignature' "$DIST/appcast.xml" || { echo "appcast に署名がありません" >&2; exit 1; }
+        rm -rf "$FEED_DIR"
+        trap - EXIT
         echo "==> GitHub Release $RELEASE_TAG へ添付"
         if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             PRERELEASE=()
@@ -271,7 +315,7 @@ GUIDE
                 "${PRERELEASE[@]}" >/dev/null
             echo "    Release を新規作成（notes は自動生成 — 後で整える）"
         fi
-        gh release upload "$RELEASE_TAG" "$DMG" --clobber >/dev/null
+        gh release upload "$RELEASE_TAG" "$DMG" "$DIST/appcast.xml" --clobber >/dev/null
         echo "    $(gh release view "$RELEASE_TAG" --json url -q .url)"
     fi
 

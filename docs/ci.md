@@ -3,6 +3,9 @@
 2026-08-09 導入（mako 裁定: self-hosted / フルマトリクス毎回 / 実 AU テスト込み）。
 workflow は `.github/workflows/ci.yml`。まず `scripts/test-roto-midistage.sh` で ROTO の
 unit / transport 回帰を実行し、その後 `scripts/test-matrix.sh` のフルマトリクスを回す。
+最後に ad-hoc 署名の `.app` を組み、`scripts/test-app-bundle.py` で Sparkle の同梱・rpath と
+自動適用を許可しない更新ポリシーを確かめる。Developer ID / 公証 / 更新署名鍵は CI には不要。
+アプリの起動・インストール・公開はしない。
 
 ## なぜ self-hosted か
 

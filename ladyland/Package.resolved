@@ -1,5 +1,5 @@
 {
-  "originHash" : "8652e0b214363354da4582b55b5a7af9ccc50d3d29b2a89cec69348bbcc1f16c",
+  "originHash" : "960ea5bb8bfe99d09560ea9f5fbd0f8c57718abfd6d812a2c422000d4159e142",
   "pins" : [
     {
       "identity" : "club-unison",
@@ -25,6 +25,15 @@
       "location" : "https://github.com/chronista-club/midistage.git",
       "state" : {
         "revision" : "fc9360edc2e31aa19eafa08dc35e716892517ef8"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
       }
     },
     {
