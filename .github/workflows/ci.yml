@@ -58,3 +58,12 @@ jobs:
       # フルマトリクス（3 モード + release ビルド）。定義は scripts/test-matrix.sh が正典
       - name: test-matrix
         run: ./scripts/test-matrix.sh
+
+      # Sparkle の framework/rpath と更新ポリシーを、実際の .app で確かめる。
+      # 公証・公開・インストール・アプリ起動はしない。
+      - name: app bundle
+        env:
+          LADYLAND_SIGN_IDENTITY: "-"
+        run: |
+          ./scripts/build-app.sh
+          python3 scripts/test-app-bundle.py

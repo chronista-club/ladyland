@@ -18,6 +18,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.creoTheme) private var theme
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var appDelegate: AppDelegate
 
     /// ↑↓ 一回あたりの音量ステップ
     private let gainStep: Float = 0.05
@@ -529,6 +530,16 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .keyboardShortcut("d", modifiers: .command)
                 .help("Debug ログ（Cmd+D）")
+
+                if let version = appDelegate.availableUpdateVersion {
+                    Button(action: appDelegate.checkForUpdates) {
+                        Label("更新あり", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundColor(theme.textSecondary)
+                    .disabled(!appDelegate.canCheckForUpdates)
+                    .help("バージョン \(version) を確認。適用・再起動は確認後に選べます")
+                }
 
                 Button(action: { appState.openSettings() }) {
                     Image(systemName: "gearshape")
