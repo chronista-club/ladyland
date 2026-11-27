@@ -1,5 +1,5 @@
 {
-  "originHash" : "0ce0740faccc049d0dd3df1204d8588616785f7ef6a8dd32509f3378a45c5551",
+  "originHash" : "fbb590df4cc3a298380a818e1abadeb2774f73255710774606846360b38674f0",
   "pins" : [
     {
       "identity" : "club-unison",
@@ -24,7 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/chronista-club/lnx.git",
       "state" : {
-        "revision" : "8dc6c71a82d78e5ed8773907e58a93a8377c34b8"
+        "revision" : "3403f89526910d11bf1b081d97e5e992802882af",
+        "version" : "0.2.0"
       }
     },
     {
