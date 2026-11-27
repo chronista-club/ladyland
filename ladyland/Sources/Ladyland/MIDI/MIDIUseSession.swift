@@ -1,12 +1,12 @@
 import Foundation
 import Combine
-import MidistageClient
+import LnxClient
 
 /// アプリの使用意思と機材接続の窓口。実機ポートへのフォールバックはしない。
 @MainActor
 final class MIDIUseSession: ObservableObject {
     let access = NativeAccess()
-    @Published private(set) var snapshot: MidistageClient.Snapshot?
+    @Published private(set) var snapshot: LnxClient.Snapshot?
     @Published private(set) var connected = false
     @Published private(set) var connectionError: String?
     @Published private(set) var rotoSetupError: String?
@@ -14,26 +14,26 @@ final class MIDIUseSession: ObservableObject {
     @Published private(set) var rotoApplying = false
     var rotoConfiguring: Bool { rotoSelecting || rotoApplying }
     var hasRotoLease: Bool {
-        guard connected, task?.isCancelled != true, let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }) else { return false }
+        guard connected, task?.isCancelled != true, let device = devices.first(where: { $0.gearID == "roto" && owns($0) }) else { return false }
         return Self.rotoSetups.allSatisfy { device.setupOwners?["ladyland"]?.contains($0) == true }
     }
-    var onReleased: ((DeviceView) async -> Void)?
-    var onAcquired: ((DeviceView) -> Void)?
-    var onSnapshot: ((MidistageClient.Snapshot) -> Void)?
-    private var owned: [String: DeviceView] = [:]
+    var onReleased: ((GearView) async -> Void)?
+    var onAcquired: ((GearView) -> Void)?
+    var onSnapshot: ((LnxClient.Snapshot) -> Void)?
+    private var owned: [String: GearView] = [:]
     private var releases: [String: Task<Void, Never>] = [:]
-    private var client: MidistageClient.Client?
+    private var client: LnxClient.Client?
     private var task: Task<Void, Never>?
     private var rotoErrorLease: String?
     private let endpointURL: URL
     private let nativeMIDI: Bool
 
-    init(endpointURL: URL = MidistageClient.Client.defaultEndpointURL, nativeMIDI: Bool = true) {
+    init(endpointURL: URL = LnxClient.Client.defaultEndpointURL, nativeMIDI: Bool = true) {
         self.endpointURL = endpointURL
         self.nativeMIDI = nativeMIDI
     }
-    var devices: [DeviceView] { snapshot?.devices ?? [] }
-    func owns(_ device: DeviceView) -> Bool { snapshot?.owns(device) ?? false }
+    var devices: [GearView] { snapshot?.gears ?? [] }
+    func owns(_ device: GearView) -> Bool { snapshot?.owns(device) ?? false }
 
     func start() {
         guard task == nil else { return }
@@ -44,16 +44,16 @@ final class MIDIUseSession: ObservableObject {
         await task?.value
         task = nil
     }
-    func setEnabled(_ device: DeviceView, enabled: Bool, takeover: Bool = false) async throws {
+    func setEnabled(_ device: GearView, enabled: Bool, takeover: Bool = false) async throws {
         guard let client, connected else { throw MIDIUseError.unavailable }
-        _ = try await client.setEnabled(deviceID: device.deviceID, enabled: enabled,
+        _ = try await client.setEnabled(gearID: device.gearID, enabled: enabled,
                                        expectedRevision: device.assignment.revision, takeover: takeover)
     }
     /// Apply は冊の中身だけを変える。currentSetup との一致を完了条件にしない。
-    static func configurationFinished(_ current: MidistageClient.Snapshot,
-                                      accepted: MidistageClient.Snapshot, token: String) throws -> Bool {
+    static func configurationFinished(_ current: LnxClient.Snapshot,
+                                      accepted: LnxClient.Snapshot, token: String) throws -> Bool {
         guard current.serverEpoch == accepted.serverEpoch, current.sessionID == accepted.sessionID,
-              let roto = current.devices.first(where: { $0.deviceID == "roto" }),
+              let roto = current.gears.first(where: { $0.gearID == "roto" }),
               current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
         guard current.sequence > accepted.sequence, roto.configuring == false else { return false }
         if let error = roto.configError { throw MIDIUseError.rotoConfigurationFailed(error) }
@@ -63,7 +63,7 @@ final class MIDIUseSession: ObservableObject {
     /// 4 冊のうち希望値が変わった冊を順に渡す。送信中は Select と排他にする。
     func applyRotoSetups(_ payloads: [RotoSetupPayload]) async throws {
         guard let client, connected, let first = snapshot,
-              let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }),
+              let device = devices.first(where: { $0.gearID == "roto" && owns($0) }),
               !rotoConfiguring, !payloads.isEmpty,
               Set(payloads.map(\.setup)).count == payloads.count,
               payloads.allSatisfy({ Self.rotoSetups.contains($0.setup)
@@ -74,12 +74,12 @@ final class MIDIUseSession: ObservableObject {
         rotoErrorLease = nil
         defer { rotoApplying = false }
         access.revoke(profileID: "roto")
-        await release(device.deviceID)
-        func currentRoto() throws -> DeviceView {
+        await release(device.gearID)
+        func currentRoto() throws -> GearView {
             try Task.checkCancellation()
             guard self.client === client, connected, task?.isCancelled != true, let current = snapshot,
                   current.serverEpoch == first.serverEpoch, current.sessionID == first.sessionID,
-                  let roto = current.devices.first(where: { $0.deviceID == "roto" }),
+                  let roto = current.gears.first(where: { $0.gearID == "roto" }),
                   current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
             return roto
         }
@@ -93,9 +93,9 @@ final class MIDIUseSession: ObservableObject {
                     }
                     try await Task.sleep(for: .milliseconds(20))
                 }
-                let accepted = try await client.applyDeviceSetup(deviceID: "roto", leaseToken: token,
-                                                                  setup: payload.setup, content: payload.content)
-                guard accepted.devices.first(where: { $0.deviceID == "roto" })?.configuring == true else {
+                let accepted = try await client.applyGearSetup(gearID: "roto", leaseToken: token,
+                                                               setup: payload.setup, content: payload.content)
+                guard accepted.gears.first(where: { $0.gearID == "roto" })?.configuring == true else {
                     throw MIDIUseError.rotoConfigurationFailed("サービスが書き込み受付を確認できませんでした。")
                 }
                 while true {
@@ -111,7 +111,7 @@ final class MIDIUseSession: ObservableObject {
             rotoSetupError = nil
         } catch {
             if self.client === client,
-               let latest = devices.first(where: { $0.deviceID == "roto" }),
+               let latest = devices.first(where: { $0.gearID == "roto" }),
                owns(latest), latest.lease?.token == token {
                 noteRotoFailure(error.localizedDescription, lease: token)
             }
@@ -120,7 +120,7 @@ final class MIDIUseSession: ObservableObject {
     }
     func selectRotoSetup(_ setup: Int) async throws {
         guard let client, connected,
-              let device = devices.first(where: { $0.deviceID == "roto" && owns($0) }),
+              let device = devices.first(where: { $0.gearID == "roto" && owns($0) }),
               !rotoConfiguring, device.configuring != true, Self.rotoSetups.contains(setup),
               device.setupOwners?["ladyland"]?.contains(setup) == true,
               let token = device.lease?.token else { throw MIDIUseError.rotoUnavailable }
@@ -131,15 +131,15 @@ final class MIDIUseSession: ObservableObject {
         // 受付→完了がポーリング間に収まっても、送信停止と同期リセットを省かない。
         // この要求自身は RotoService の workGate を保持しない（release の待ちと循環させない）。
         access.revoke(profileID: "roto")
-        await release(device.deviceID)
+        await release(device.gearID)
         do {
             try Task.checkCancellation()
             guard self.client === client, connected, task?.isCancelled != true,
-                  let latest = devices.first(where: { $0.deviceID == device.deviceID }),
+                  let latest = devices.first(where: { $0.gearID == device.gearID }),
                   owns(latest), latest.lease?.token == token
             else { throw MIDIUseError.rotoUnavailable }
-            let accepted = try await client.selectSetup(deviceID: device.deviceID, leaseToken: token, setup: setup)
-            guard accepted.devices.first(where: { $0.deviceID == device.deviceID })?.configuring == true
+            let accepted = try await client.selectSetup(gearID: device.gearID, leaseToken: token, setup: setup)
+            guard accepted.gears.first(where: { $0.gearID == device.gearID })?.configuring == true
             else { throw MIDIUseError.rotoConfigurationFailed("サービスが切替受付を確認できませんでした。") }
             // 応答は受付。適用は受信 loop に一本化し、その後の同じ lease の完了を待つ。
             let deadline = ContinuousClock.now + .seconds(30)
@@ -147,7 +147,7 @@ final class MIDIUseSession: ObservableObject {
                 try Task.checkCancellation()
                 guard self.client === client, connected, task?.isCancelled != true, let current = snapshot,
                       current.serverEpoch == accepted.serverEpoch, current.sessionID == accepted.sessionID,
-                      let roto = current.devices.first(where: { $0.deviceID == device.deviceID }),
+                      let roto = current.gears.first(where: { $0.gearID == device.gearID }),
                       current.owns(roto), roto.lease?.token == token else { throw MIDIUseError.rotoUnavailable }
                 if current.sequence > accepted.sequence, roto.configuring == false {
                     if let error = roto.configError { throw MIDIUseError.rotoConfigurationFailed(error) }
@@ -164,7 +164,7 @@ final class MIDIUseSession: ObservableObject {
             rotoSetupError = nil
         } catch {
             if self.client === client,
-               let latest = devices.first(where: { $0.deviceID == device.deviceID }),
+               let latest = devices.first(where: { $0.gearID == device.gearID }),
                owns(latest), latest.lease?.token == token {
                 noteRotoFailure(error.localizedDescription, lease: token)
             }
@@ -176,8 +176,8 @@ final class MIDIUseSession: ObservableObject {
               let token = device.lease?.token, let port = device.nativeOutputs.first else { return false }
         Task { [weak self] in
             do {
-                _ = try await client.sendMIDI(deviceID: device.deviceID, leaseToken: token, portName: port, bytes: bytes)
-                guard let self, self.owned[device.deviceID]?.lease?.token == token else { return }
+                _ = try await client.sendMIDI(gearID: device.gearID, leaseToken: token, portName: port, bytes: bytes)
+                guard let self, self.owned[device.gearID]?.lease?.token == token else { return }
                 completion()
             } catch {
                 // LedBus の watchdog が再試行する。失敗を実機送信完了にしない。
@@ -195,17 +195,17 @@ final class MIDIUseSession: ObservableObject {
               device.lease?.token == lease,
               let port = device.nativeOutputs.first(where: { $0.hasSuffix("X-Touch INT") })
         else { throw MIDIUseError.unavailable }
-        _ = try await client.sendMIDI(deviceID: device.deviceID, leaseToken: lease, portName: port, bytes: bytes)
+        _ = try await client.sendMIDI(gearID: device.gearID, leaseToken: lease, portName: port, bytes: bytes)
     }
 
     /// 一つの受信 loop だけから適用する。遅延した応答では所有権を戻さない。
-    func apply(_ incoming: MidistageClient.Snapshot) async {
+    func apply(_ incoming: LnxClient.Snapshot) async {
         // lease の所有と、設定が済んで演奏できることは別。設定中は
         // NativeAccess も閉じ、遅延した MIDI callback / sender を通さない。
         var usable = incoming
         let staleSelectionError = rotoErrorLease != nil
-            && incoming.devices.first(where: { $0.deviceID == "roto" })?.lease?.token != rotoErrorLease
-        usable.devices = incoming.devices.filter { device in
+            && incoming.gears.first(where: { $0.gearID == "roto" })?.lease?.token != rotoErrorLease
+        usable.gears = incoming.gears.filter { device in
             guard device.profileID == "roto" else { return true }
             return !rotoConfiguring
                 && device.configuring == false && device.configError == nil
@@ -215,7 +215,7 @@ final class MIDIUseSession: ObservableObject {
         guard access.update(usable) else { return }
         if staleSelectionError { rotoSetupError = nil; rotoErrorLease = nil }
         snapshot = incoming
-        let next = Dictionary(uniqueKeysWithValues: usable.devices.filter(usable.owns).map { ($0.deviceID, $0) })
+        let next = Dictionary(uniqueKeysWithValues: usable.gears.filter(usable.owns).map { ($0.gearID, $0) })
         for (id, previous) in owned {
             if next[id]?.lease != previous.lease || next[id]?.nativePorts != previous.nativePorts
                 || (previous.profileID == "roto" && next[id]?.currentSetup != previous.currentSetup) {
@@ -225,10 +225,10 @@ final class MIDIUseSession: ObservableObject {
         // Select / Apply が開始した release も含め、同じ drain を待つ。
         // owned から除去済みでも、完了前に quiesced / 再取得へ進まない。
         await drainReleases()
-        for device in usable.devices where usable.owns(device) && owned[device.deviceID] == nil {
+        for device in usable.gears where usable.owns(device) && owned[device.gearID] == nil {
             // 別機材の release を await している間に設定要求が始まった場合も守る。
             if device.profileID == "roto" && rotoConfiguring { continue }
-            owned[device.deviceID] = device
+            owned[device.gearID] = device
             onAcquired?(device)
         }
         onSnapshot?(incoming)
@@ -267,7 +267,7 @@ final class MIDIUseSession: ObservableObject {
     private func run() async {
         while !Task.isCancelled {
             do {
-                let (connection, first) = try await MidistageClient.Client.connect(
+                let (connection, first) = try await LnxClient.Client.connect(
                     endpointURL: endpointURL, clientID: "ladyland", displayName: "Ladyland",
                     nativeMIDI: nativeMIDI,
                     initialEnabledProfiles: ["nanokontrol", "lpd8", "roto", "keystage", "numa", "minilab", "fgdp", "generic"])
@@ -282,21 +282,21 @@ final class MIDIUseSession: ObservableObject {
                 while !Task.isCancelled {
                     // 未接続の機材がまだ台帳に無い場合は、現れた時に一度だけ登録する。
                     // conflict / 旧サービスの未対応で、他の機材まで切断・再接続しない。
-                    if !registrationAttempted, current.devices.contains(where: { $0.deviceID == "roto" }) {
+                    if !registrationAttempted, current.gears.contains(where: { $0.gearID == "roto" }) {
                         registrationAttempted = true
                         do {
-                            current = try await connection.setDeviceSetups(deviceID: "roto", setups: Self.rotoSetups)
+                            current = try await connection.setGearSetups(gearID: "roto", setups: Self.rotoSetups)
                         } catch {
                             try Task.checkCancellation()
                             rotoSetupError = error.localizedDescription
                         }
                     }
                     await apply(current)
-                    for device in current.devices where device.phase == "releasing" {
+                    for device in current.gears where device.phase == "releasing" {
                         if let lease = device.lease, lease.sessionID == current.sessionID,
                            !acknowledged.contains(lease.token) {
                             // apply が入力停止・発音整理・送信/serial 作業の完了を待った後。
-                            _ = try await connection.quiesced(deviceID: device.deviceID, leaseToken: lease.token)
+                            _ = try await connection.quiesced(gearID: device.gearID, leaseToken: lease.token)
                             acknowledged.insert(lease.token)
                         }
                     }
@@ -329,7 +329,7 @@ enum MIDIUseError: LocalizedError {
 }
 
 @MainActor
-final class MidistageLedSender: LedSender {
+final class LnxLedSender: LedSender {
     private weak var session: MIDIUseSession?
     private var generation: UInt64 = 0
     init(session: MIDIUseSession) { self.session = session }

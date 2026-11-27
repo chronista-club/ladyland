@@ -1,7 +1,7 @@
 // mem_1Cg9RCew1FXTqxVCJjgcrs
 import Foundation
 import Testing
-import MidistageClient
+import LnxClient
 @testable import Ladyland
 
 @Suite @MainActor
@@ -9,10 +9,10 @@ struct RotoMidistageTests {
     @Test func configuringStopsIOAndReacquiresAfterCompletion() async throws {
         let session = MIDIUseSession()
         var events: [String] = []
-        session.onAcquired = { events.append("acquire:\($0.deviceID)") }
+        session.onAcquired = { events.append("acquire:\($0.gearID)") }
         session.onReleased = { device in
             #expect(!session.access.allowsOutput("roto output"))
-            events.append("release:\(device.deviceID)")
+            events.append("release:\(device.gearID)")
         }
         await session.apply(try rotoSnapshot(sequence: 1, configuring: true))
         #expect(events == ["acquire:lpd"])
@@ -33,7 +33,7 @@ struct RotoMidistageTests {
     @Test func failedConfigurationDoesNotStartMotors() async throws {
         let session = MIDIUseSession()
         var acquired: [String] = []
-        session.onAcquired = { acquired.append($0.deviceID) }
+        session.onAcquired = { acquired.append($0.gearID) }
         await session.apply(try rotoSnapshot(sequence: 1, error: "admin port busy"))
         #expect(acquired == ["lpd"])
         #expect(!session.access.allowsOutput("roto output"))
@@ -48,10 +48,10 @@ struct RotoMidistageTests {
     @Test func clientSideFailureKeepsRotoPlayable() async throws {
         let session = MIDIUseSession()
         var acquired: [String] = []
-        session.onAcquired = { acquired.append($0.deviceID) }
+        session.onAcquired = { acquired.append($0.gearID) }
         await session.apply(try rotoSnapshot(sequence: 1))
         #expect(Set(acquired) == ["lpd", "roto"])
-        let token = try #require(session.devices.first { $0.deviceID == "roto" }?.lease?.token)
+        let token = try #require(session.devices.first { $0.gearID == "roto" }?.lease?.token)
         session.noteRotoFailure("ROTO の書き込みが時間内に完了しませんでした。", lease: token)
         await session.apply(try rotoSnapshot(sequence: 2))
         #expect(session.access.allowsOutput("roto output"), "サービスが正常なら ROTO は使える")
@@ -63,7 +63,7 @@ struct RotoMidistageTests {
         let session = MIDIUseSession()
         for (index, setup) in [nil, 8].enumerated() {
             var pending = try rotoSnapshot(sequence: index + 1)
-            pending.devices[0].currentSetup = setup
+            pending.gears[0].currentSetup = setup
             await session.apply(pending)
             #expect(!session.access.allowsOutput("roto output"))
         }
@@ -91,10 +91,10 @@ struct RotoMidistageTests {
     @Test func setupChangeBetweenPollsResetsMotorSynchronization() async throws {
         let session = MIDIUseSession()
         var acquired = 0
-        session.onAcquired = { if $0.deviceID == "roto" { acquired += 1 } }
+        session.onAcquired = { if $0.gearID == "roto" { acquired += 1 } }
         await session.apply(try rotoSnapshot(sequence: 1))
         var changed = try rotoSnapshot(sequence: 2)
-        changed.devices[0].currentSetup = 3
+        changed.gears[0].currentSetup = 3
         await session.apply(changed)
         #expect(acquired == 2)
         await session.apply(try rotoSnapshot(sequence: 3, configuring: true))
@@ -105,9 +105,9 @@ struct RotoMidistageTests {
 }
 
 func rotoSnapshot(sequence: Int, configuring: Bool = false, error: String? = nil,
-                  phase: String = "active", token: String = "roto-lease") throws -> MidistageClient.Snapshot {
+                  phase: String = "active", token: String = "roto-lease") throws -> LnxClient.Snapshot {
     func device(_ id: String, profile: String) -> [String: Any] { [
-        "device_id": id, "profile_id": profile, "name": profile, "present": true,
+        "gear_id": id, "profile_id": profile, "name": profile, "present": true,
         "assignment": ["client_id": "ladyland", "revision": 1, "expected": true],
         "phase": id == "roto" ? phase : "active",
         "lease": ["session_id": "session", "token": id == "roto" ? token : "lpd-lease"],
@@ -118,8 +118,8 @@ func rotoSnapshot(sequence: Int, configuring: Bool = false, error: String? = nil
     roto["current_setup"] = 2
     roto["setup_owners"] = ["ladyland": [0, 1, 2, 3], "vp": [8]]
     roto["config_error"] = error
-    return try JSONDecoder().decode(MidistageClient.Snapshot.self, from: JSONSerialization.data(withJSONObject: [
+    return try JSONDecoder().decode(LnxClient.Snapshot.self, from: JSONSerialization.data(withJSONObject: [
         "sequence": sequence, "protocol_version": 1, "server_epoch": "test", "session_id": "session",
-        "devices": [roto, device("lpd", profile: "lpd8")]
+        "gears": [roto, device("lpd", profile: "lpd8")]
     ]))
 }

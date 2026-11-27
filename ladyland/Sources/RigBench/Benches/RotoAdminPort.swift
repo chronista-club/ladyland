@@ -2,7 +2,7 @@
 //!
 //! フレーミングは `RotoAdmin`（純粋層）、こちらは線の世話だけ。
 //! RigBench の調査ベンチ専用。Ladyland 本体にはリンクしない。
-//! 通常の切替え・読み書きは midistage 経由（docs/roto-control/admin-port.md）。
+//! 通常の切替え・読み書きは lnx 経由（docs/roto-control/admin-port.md）。
 //!
 //! ## 掟: 瞬間芸（open → 用事 → close）
 //!

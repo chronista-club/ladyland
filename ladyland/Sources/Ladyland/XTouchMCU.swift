@@ -1,6 +1,6 @@
 import Foundation
 
-/// MCU byte変換（Ardour MCU / Midistage Rust profileと同じwire形式）。I/Oを持たない。
+/// MCU byte変換（Ardour MCU / lnx-gear Rust profileと同じwire形式）。I/Oを持たない。
 enum XTouchMCU {
     enum Event: Equatable {
         case fader(Int, Float), pan(Int, Int), mute(Int), solo(Int), select(Int)

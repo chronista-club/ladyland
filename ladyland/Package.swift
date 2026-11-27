@@ -11,13 +11,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
-        .package(url: "https://github.com/chronista-club/midistage.git", revision: "fc9360edc2e31aa19eafa08dc35e716892517ef8"),
+        .package(url: "https://github.com/chronista-club/lnx.git", revision: "8dc6c71a82d78e5ed8773907e58a93a8377c34b8"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
-        // 「path 依存で共有」パターン（cortex ↔ midistage-profiles と同型）
+        // 「path 依存で共有」パターン（cortex ↔ lnx-gear と同型）
         .package(path: "../../creo-ui/packages/swift"),
-        // Field と MidistageClient は同じ Unison package identity / version を使う。
-        .package(url: "https://github.com/chronista-club/club-unison.git", exact: "2.0.0"),
+        // Field と LnxClient は同じ Unison package identity / version を使う。
+        .package(url: "https://github.com/chronista-club/club-unison.git", from: "2.3.0"),
         // 永続化の SSOT（mako 裁定 2026-08-02「GRDB 導入しよう。ここが SSOT」）。
         // SQLite ツールキット — 接続を直接触らせない設計（DatabaseQueue が
         // 書き込みを直列化）なので、競合を「解決」せず存在させない構造に載る
@@ -59,7 +59,7 @@ let package = Package(
                 "RotoKit",
                 "KeystageKit",
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "MidistageClient", package: "midistage"),
+                .product(name: "LnxClient", package: "lnx"),
                 .product(name: "CreoUI", package: "swift"),
                 .product(name: "UnisonClient", package: "club-unison"),
                 .product(name: "GRDB", package: "GRDB.swift")

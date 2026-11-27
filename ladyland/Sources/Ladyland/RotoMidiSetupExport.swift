@@ -15,8 +15,8 @@
 //! オミット — 冊の移動は実機の SEL で。
 //!
 //! 実機への入れ方は 2 経路（同じビルダから生成 — 第 2 の定義を作らない）:
-//! 1. **サービスへの書き込み**: midistage の ApplyDeviceSetup へ渡す。
-//!    book を冊単位で渡す。Serial の開閉と席単位の差分は midistaged の責務
+//! 1. **サービスへの書き込み**: lnx の ApplyGearSetup へ渡す。
+//!    book を冊単位で渡す。Serial の開閉と席単位の差分は lnx-server の責務
 //! 2. **Export All 互換 JSON**: ROTO-SETUP の File > Import 用（控え）
 //!
 //! ミキサー冊の席名は**焼いた時点のスロット名のスナップショット**。

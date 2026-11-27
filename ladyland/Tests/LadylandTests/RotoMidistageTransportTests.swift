@@ -1,19 +1,19 @@
 // mem_1Cg9RCew1FXTqxVCJjgcrs
 import Foundation
 import Testing
-import MidistageClient
+import LnxClient
 @testable import Ladyland
 
-/// midistage の protocol_fixture のみ。常駐 endpoint・実機ポートには触れない。
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
+/// lnx-server の gear_fixture のみ。常駐 endpoint・実機ポートには触れない。
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LNX_TEST_SERVER"] != nil))
 @MainActor func rotoSessionRegistersOnlyItsFourSetups() async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
     let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
     var releasedRoto = 0
-    session.onReleased = { if $0.deviceID == "roto" { releasedRoto += 1 } }
+    session.onReleased = { if $0.gearID == "roto" { releasedRoto += 1 } }
     session.onAcquired = { device in
-        if device.deviceID == "roto" {
+        if device.gearID == "roto" {
             #expect(!session.rotoSelecting)
             #expect(device.configuring == false)
         }
@@ -21,45 +21,45 @@ import MidistageClient
     session.start()
     do {
         try await waitForRotoCondition {
-            session.devices.first(where: { $0.deviceID == "roto" })?.setupOwners?["ladyland"] == [0, 1, 2, 3]
+            session.devices.first(where: { $0.gearID == "roto" })?.setupOwners?["ladyland"] == [0, 1, 2, 3]
         }
         #expect(session.connectionError == nil)
         #expect(session.connected)
         try await waitForRotoCondition {
-            session.devices.first(where: { $0.deviceID == "roto" })?.currentSetup == 0
+            session.devices.first(where: { $0.gearID == "roto" })?.currentSetup == 0
         }
         try await session.selectRotoSetup(3)
         // 受付だけで戻らず、送信を止めてから完了を確認する。
         #expect(releasedRoto == 1)
-        #expect(session.devices.first(where: { $0.deviceID == "roto" })?.currentSetup == 3)
+        #expect(session.devices.first(where: { $0.gearID == "roto" })?.currentSetup == 3)
         try await waitForRotoCondition {
-            session.devices.first(where: { $0.deviceID == "roto" })?.currentSetup == 3
+            session.devices.first(where: { $0.gearID == "roto" })?.currentSetup == 3
         }
         await #expect(throws: MIDIUseError.self) { try await session.selectRotoSetup(8) }
         let (vp, _) = try await Client.connect(endpointURL: fixture.endpoint, clientID: "vp",
                                               displayName: "VP fixture", nativeMIDI: false)
         do {
-            _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [8])
-            let device = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
-            _ = try await vp.setEnabled(deviceID: "roto", enabled: true,
+            _ = try await vp.setGearSetups(gearID: "roto", setups: [8])
+            let device = try #require(session.devices.first(where: { $0.gearID == "roto" }))
+            _ = try await vp.setEnabled(gearID: "roto", enabled: true,
                                         expectedRevision: device.assignment.revision, takeover: true)
             do {
                 try await session.selectRotoSetup(2)
                 Issue.record("A stale lease selected a setup after takeover")
             } catch { /* local guard or server rejects the old lease */ }
             try await waitForRotoCondition {
-                guard let device = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
+                guard let device = session.devices.first(where: { $0.gearID == "roto" }) else { return false }
                 return device.assignment.clientID == "vp" && device.currentSetup == 8 && !session.owns(device)
             }
             await #expect(throws: MIDIUseError.self) { try await session.selectRotoSetup(2) }
             #expect(session.rotoSetupError == nil)
-            let foreign = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
+            let foreign = try #require(session.devices.first(where: { $0.gearID == "roto" }))
             try await session.setEnabled(foreign, enabled: true, takeover: true)
             let releasing = try await vp.snapshot()
-            let token = try #require(releasing.devices.first(where: { $0.deviceID == "roto" })?.lease?.token)
-            _ = try await vp.quiesced(deviceID: "roto", leaseToken: token)
+            let token = try #require(releasing.gears.first(where: { $0.gearID == "roto" })?.lease?.token)
+            _ = try await vp.quiesced(gearID: "roto", leaseToken: token)
             try await waitForRotoCondition {
-                guard let device = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
+                guard let device = session.devices.first(where: { $0.gearID == "roto" }) else { return false }
                 return session.owns(device) && device.currentSetup == 3 && device.configuring == false
             }
             await vp.close()
@@ -72,7 +72,7 @@ import MidistageClient
     }
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LNX_TEST_SERVER"] != nil))
 @MainActor func rotoRegistrationConflictKeepsOtherDevicesConnected() async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
@@ -80,15 +80,15 @@ import MidistageClient
                                           displayName: "VP fixture", nativeMIDI: false)
     let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
     var acquired: [String] = []
-    session.onAcquired = { acquired.append($0.deviceID) }
+    session.onAcquired = { acquired.append($0.gearID) }
     do {
-        _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [0])
+        _ = try await vp.setGearSetups(gearID: "roto", setups: [0])
         session.start()
         try await waitForRotoCondition { session.rotoSetupError != nil }
         #expect(session.rotoSetupError?.contains("conflict") == true)
         #expect(session.connectionError == nil)
         #expect(session.connected)
-        #expect(session.devices.contains { $0.deviceID == "nano" && session.owns($0) })
+        #expect(session.devices.contains { $0.gearID == "nano" && session.owns($0) })
         #expect(!acquired.contains("roto"))
         #expect(acquired.contains("nano"))
         await session.stop()
@@ -96,7 +96,7 @@ import MidistageClient
     } catch { await session.stop(); await vp.close(); throw error }
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil), arguments: [false, true])
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LNX_TEST_SERVER"] != nil), arguments: [false, true])
 @MainActor func rotoSessionTakeoverWaitsForConfigurationDrain(applying: Bool) async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
@@ -105,28 +105,28 @@ import MidistageClient
                                           displayName: "VP fixture", nativeMIDI: false)
     let drain = RotoReleaseLatch()
     var acquired = false
-    session.onAcquired = { if $0.deviceID == "roto" { acquired = true } }
-    session.onReleased = { if $0.deviceID == "roto" { await drain.wait() } }
+    session.onAcquired = { if $0.gearID == "roto" { acquired = true } }
+    session.onReleased = { if $0.gearID == "roto" { await drain.wait() } }
     session.start()
     do {
         try await waitForRotoCondition { acquired }
-        _ = try await vp.setDeviceSetups(deviceID: "roto", setups: [8])
+        _ = try await vp.setGearSetups(gearID: "roto", setups: [8])
         let selection = Task {
             if applying { try await session.applyRotoSetups([.init(setup: 2, content: .init(name: "INST-"))]) }
             else { try await session.selectRotoSetup(2) }
         }
         try await waitForRotoCondition { drain.started }
-        let previous = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
-        let takeover = try await vp.setEnabled(deviceID: "roto", enabled: true,
+        let previous = try #require(session.devices.first(where: { $0.gearID == "roto" }))
+        let takeover = try await vp.setEnabled(gearID: "roto", enabled: true,
                                     expectedRevision: previous.assignment.revision, takeover: true)
-        #expect(takeover.devices.first(where: { $0.deviceID == "roto" })?.phase == "releasing")
+        #expect(takeover.gears.first(where: { $0.gearID == "roto" })?.phase == "releasing")
         // 受信 loop は直前の snapshot の apply 内ですでに同じ drain を待っている場合もある。
         // その loop の前進を要求せず、サービス側の lease を複数 tick にわたり観測する。
         for _ in 0..<10 {
             // fixture は20ms tickでquiesced後のleaseを更新する。即時往復だけで判定しない。
             try await Task.sleep(for: .milliseconds(20))
             let current = try await vp.snapshot()
-            let roto = try #require(current.devices.first(where: { $0.deviceID == "roto" }))
+            let roto = try #require(current.gears.first(where: { $0.gearID == "roto" }))
             #expect(roto.phase == "releasing")
             #expect(roto.lease?.token == previous.lease?.token)
         }
@@ -136,7 +136,7 @@ import MidistageClient
             Issue.record("Selection succeeded after its lease was surrendered")
         } catch { /* the old selection must be rejected */ }
         try await waitForRotoCondition {
-            guard let roto = session.devices.first(where: { $0.deviceID == "roto" }) else { return false }
+            guard let roto = session.devices.first(where: { $0.gearID == "roto" }) else { return false }
             return roto.phase == "active" && roto.currentSetup == 8 && !session.owns(roto)
         }
         await session.stop()
@@ -149,7 +149,7 @@ import MidistageClient
     }
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil), arguments: [false, true])
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LNX_TEST_SERVER"] != nil), arguments: [false, true])
 @MainActor func rotoSessionStopWaitsForConfigurationDrain(applying: Bool) async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
@@ -158,10 +158,10 @@ import MidistageClient
     var acquired = false
     var clearedNano = false
     var stopped = false
-    session.onAcquired = { if $0.deviceID == "roto" { acquired = true } }
+    session.onAcquired = { if $0.gearID == "roto" { acquired = true } }
     session.onReleased = { device in
-        if device.deviceID == "roto" { await drain.wait() }
-        if device.deviceID == "nano" { clearedNano = true }
+        if device.gearID == "roto" { await drain.wait() }
+        if device.gearID == "nano" { clearedNano = true }
     }
     session.start()
     do {
@@ -217,7 +217,7 @@ struct RotoServiceFixture {
     var endpoint: URL { directory.appendingPathComponent("endpoint.json") }
 
     static func start() async throws -> Self {
-        let binary = try #require(ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"])
+        let binary = try #require(ProcessInfo.processInfo.environment["LNX_TEST_SERVER"])
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ladyland-roto-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let process = Process()

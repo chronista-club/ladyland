@@ -1,13 +1,13 @@
 {
-  "originHash" : "960ea5bb8bfe99d09560ea9f5fbd0f8c57718abfd6d812a2c422000d4159e142",
+  "originHash" : "0ce0740faccc049d0dd3df1204d8588616785f7ef6a8dd32509f3378a45c5551",
   "pins" : [
     {
       "identity" : "club-unison",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/chronista-club/club-unison.git",
       "state" : {
-        "revision" : "63eff2ed86846fafd50a726f693e45cfe7e9595d",
-        "version" : "2.0.0"
+        "revision" : "b9a2d20c29c8bfa50420b2be2a9c1f0b0f67738a",
+        "version" : "2.4.1"
       }
     },
     {
@@ -20,11 +20,11 @@
       }
     },
     {
-      "identity" : "midistage",
+      "identity" : "lnx",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/chronista-club/midistage.git",
+      "location" : "https://github.com/chronista-club/lnx.git",
       "state" : {
-        "revision" : "fc9360edc2e31aa19eafa08dc35e716892517ef8"
+        "revision" : "8dc6c71a82d78e5ed8773907e58a93a8377c34b8"
       }
     },
     {

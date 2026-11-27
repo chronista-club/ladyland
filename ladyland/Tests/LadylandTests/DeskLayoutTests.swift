@@ -2,7 +2,7 @@
 //!
 //! 守りたい不変条件:
 //!   - 並び（`Gear/desk_layout.json`）は 8 台を重ならずに机の上へ置く
-//!   - midistage の配置データ（JSON。正本は midistage gear/<id>/gear.json）から部品とセクションを読める
+//!   - lnx の配置データ（JSON。正本は lnx gear/<id>/gear.json）から部品とセクションを読める
 //!   - Track ノブは 8 本以上のノブ列ならどの機材にも載る。LPD8 のノブ列に
 //!     載せた / 外したときだけ、LPD8 のノブの刺し先も切り替わる
 
@@ -18,10 +18,10 @@ private let repoGear = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appendingPathComponent("Gear")
 
-/// 機材の配置データの正本は midistage（docs/design/04）。配布物が入っているマシンでだけ読む
-private let midistageGear = GearAssets.midistageDirectory
-private let hasMidistageGear = FileManager.default.fileExists(
-    atPath: midistageGear.appendingPathComponent("manifest.json").path)
+/// 機材の配置データの正本は lnx（docs/design/03-gear-and-desk.md）。配布物が入っているマシンでだけ読む
+private let lnxGear = GearAssets.lnxDirectory
+private let hasLnxGear = FileManager.default.fileExists(
+    atPath: lnxGear.appendingPathComponent("manifest.json").path)
 
 @Suite("3D の机 — 並び")
 struct DeskLayoutModelTests {
@@ -199,9 +199,9 @@ struct GearBlueprintJSONTests {
         #expect(b.sections.first { $0.id == "x.pads" }?.kind == .pads)
     }
 
-    @Test("X-TOUCH は 8 チャンネルと独立したマスターフェーダーを持つ", .enabled(if: hasMidistageGear))
+    @Test("X-TOUCH は 8 チャンネルと独立したマスターフェーダーを持つ", .enabled(if: hasLnxGear))
     func xtouch() throws {
-        let b = try GearBlueprint.decode(Data(contentsOf: midistageGear.appendingPathComponent("xtouch.json")))
+        let b = try GearBlueprint.decode(Data(contentsOf: lnxGear.appendingPathComponent("xtouch.json")))
         #expect(b.size == SIMD3<Float>(452, 100, 301))
         #expect(b.parts.filter { $0.kind == .fader }.count == 9)
         #expect(b.parts.filter { $0.kind == .fader }.allSatisfy { $0.travel == 100 })
@@ -210,10 +210,10 @@ struct GearBlueprintJSONTests {
         #expect(b.sections.allSatisfy { $0.ccs.isEmpty }, "MCU の制御を汎用 CC として捏造しない")
     }
 
-    @Test("midistage の配置データは全部読める", .enabled(if: hasMidistageGear))
-    func midistageFiles() throws {
+    @Test("lnx の配置データは全部読める", .enabled(if: hasLnxGear))
+    func lnxFiles() throws {
         for id in ["lpd8", "keystage", "roto", "fgdp", "numa", "minilab", "xtouch", "nanokontrol"] {
-            let b = try GearBlueprint.decode(Data(contentsOf: midistageGear.appendingPathComponent("\(id).json")))
+            let b = try GearBlueprint.decode(Data(contentsOf: lnxGear.appendingPathComponent("\(id).json")))
             #expect(b.id == id)
             #expect(!b.sections.isEmpty)
         }

@@ -43,7 +43,7 @@ final class AppState: ObservableObject {
     lazy var rotoSetupSync = RotoSetupSync(session: midiUse)
     lazy var xtouch = XTouchController(rack: rack, onSelect: { [weak self] in self?.select($0) },
         onChange: { [weak self] in self?.scheduleAutosave() })
-    lazy var ledBus = LedBus(sender: MidistageLedSender(session: midiUse))
+    lazy var ledBus = LedBus(sender: LnxLedSender(session: midiUse))
     /// ROTO-CONTROL projector 常駐（push 型。docs/roto-control/protocol.md）
     let roto = RotoService()
     /// Keystage の ARP / CHORD 設定を送り込む常駐（push 型。docs/keystage/README.md）
@@ -641,7 +641,7 @@ final class AppState: ObservableObject {
         midiUse.onReleased = { [weak self] device in
             guard let self else { return }
             self.midi?.refresh()
-            self.router.releaseDevice(device.deviceID)
+            self.router.releaseDevice(device.gearID)
             switch device.profileID {
             case "lpd8":
                 self.ledBus.setDeviceAvailable(false)

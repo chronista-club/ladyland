@@ -9,7 +9,7 @@ struct XTouchSurfaceTests {
     func dedicatedSurface() {
         #expect(SurfaceTab(rawValue: "xtouch") != nil)
         #expect(PaneID(rawValue: "xtouch") != nil)
-        let route = MIDIInput.route(forSourceName: "Midistage/ladyland/lease/1|X-Touch INT", hasKeystage: false)
+        let route = MIDIInput.route(forSourceName: "Lnx/ladyland/lease/1|X-Touch INT", hasKeystage: false)
         #expect(route != .genericKeyboard)
         #expect(route != nil)
         #expect(MIDIInput.route(forSourceName: "X-Touch EXT", hasKeystage: true) == nil)

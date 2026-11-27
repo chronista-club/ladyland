@@ -1,7 +1,7 @@
 // mem_1Cg9RCew1FXTqxVCJjgcrs
 import Foundation
 import Testing
-import MidistageClient
+import LnxClient
 import RotoKit
 @testable import Ladyland
 
@@ -68,16 +68,16 @@ struct RotoMidistageApplyTests {
         #expect(try !MIDIUseSession.configurationFinished(accepted, accepted: accepted, token: "roto-lease"))
         var current = try rotoSnapshot(sequence: 3)
         // Apply は現在の冊を切り替えない。書いた冊の番号とは比較しない。
-        current.devices[0].currentSetup = 0
+        current.gears[0].currentSetup = 0
         #expect(try MIDIUseSession.configurationFinished(current, accepted: accepted, token: "roto-lease"))
-        current.devices[0].configError = "readback mismatch"
+        current.gears[0].configError = "readback mismatch"
         #expect(throws: MIDIUseError.self) {
             try MIDIUseSession.configurationFinished(current, accepted: accepted, token: "roto-lease")
         }
-        current.devices[0].configError = nil
-        current.devices[0].configuring = true
+        current.gears[0].configError = nil
+        current.gears[0].configuring = true
         #expect(try !MIDIUseSession.configurationFinished(current, accepted: accepted, token: "roto-lease"))
-        current.devices[0].configuring = false
+        current.gears[0].configuring = false
         current.sequence = 1
         #expect(try !MIDIUseSession.configurationFinished(current, accepted: accepted, token: "roto-lease"))
         current.sequence = 3
@@ -97,23 +97,23 @@ struct RotoMidistageApplyTests {
 
 }
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MIDISTAGE_TEST_SERVER"] != nil))
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LNX_TEST_SERVER"] != nil))
 @MainActor func rotoSessionApplyWaitsForCompletionWithoutSelectingTheWrittenSetup() async throws {
     let fixture = try await RotoServiceFixture.start()
     defer { fixture.stop() }
     let session = MIDIUseSession(endpointURL: fixture.endpoint, nativeMIDI: false)
     var releases = 0
-    session.onReleased = { if $0.deviceID == "roto" { releases += 1 } }
+    session.onReleased = { if $0.gearID == "roto" { releases += 1 } }
     session.start()
     do {
         try await waitForRotoCondition {
-            session.devices.first(where: { $0.deviceID == "roto" })?.currentSetup == 0
+            session.devices.first(where: { $0.gearID == "roto" })?.currentSetup == 0
         }
         let before = try #require(session.snapshot?.sequence)
         let payloads = try RotoMidiSetupExport.books(slotNames: ["Piano"], seatLabels: [0: "Cutoff"],
                 assignedSeatsOnly: true).map(RotoMidiSetupExport.servicePayload)
         try await session.applyRotoSetups(payloads)
-        let roto = try #require(session.devices.first(where: { $0.deviceID == "roto" }))
+        let roto = try #require(session.devices.first(where: { $0.gearID == "roto" }))
         #expect(session.snapshot!.sequence > before)
         #expect(roto.currentSetup == 0)
         #expect(roto.configuring == false)
