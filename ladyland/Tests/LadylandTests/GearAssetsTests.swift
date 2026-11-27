@@ -1,5 +1,5 @@
-//! 機材の 3D 資産は midistage が正本（midistage docs/design/04、mako「midistage に集めるか。3D モデルも。」）。
-//! Ladyland は midistage の置き場を優先し、無ければ従来の `ladyland/gear` にフォールバックする。
+//! 機材の 3D 資産は lnx が正本（lnx docs/design/03-gear-and-desk.md）。
+//! Ladyland は lnx の置き場を優先し、無ければ従来の `ladyland/gear` にフォールバックする。
 //! 機材 ID は inventory の ID（numa / fgdp）に揃い、机の配置に残る旧 ID（ncxse / fgdp50）は読み替える。
 
 import Foundation
@@ -15,18 +15,18 @@ struct GearAssetsTests {
         return d
     }
 
-    @Test("manifest.json のある midistage の置き場を優先する")
-    func prefersMidistageWhenManifestExists() throws {
-        let studio = try temp(), midistage = try temp()
-        try Data("{}".utf8).write(to: midistage.appendingPathComponent("manifest.json"))
-        #expect(GearAssets.gearDirectory(studio: studio, midistage: midistage) == midistage)
+    @Test("manifest.json のある lnx の置き場を優先する")
+    func prefersLnxWhenManifestExists() throws {
+        let studio = try temp(), lnx = try temp()
+        try Data("{}".utf8).write(to: lnx.appendingPathComponent("manifest.json"))
+        #expect(GearAssets.gearDirectory(studio: studio, lnx: lnx) == lnx)
     }
 
-    @Test("midistage の置き場が無い / manifest が無いときは従来の置き場")
+    @Test("lnx の置き場が無い / manifest が無いときは従来の置き場")
     func fallsBackToStudio() throws {
         let studio = try temp(), empty = try temp()
-        #expect(GearAssets.gearDirectory(studio: studio, midistage: empty) == studio)
-        #expect(GearAssets.gearDirectory(studio: studio, midistage: studio.appendingPathComponent("nope")) == studio)
+        #expect(GearAssets.gearDirectory(studio: studio, lnx: empty) == studio)
+        #expect(GearAssets.gearDirectory(studio: studio, lnx: studio.appendingPathComponent("nope")) == studio)
     }
 
     @Test("旧 ID は inventory の ID に読み替える（ncxse → numa、fgdp50 → fgdp）")
@@ -45,8 +45,8 @@ struct GearAssetsTests {
         #expect(GearAssets.lookup(catalog, id: "roto") == nil)
     }
 
-    @Test("midistage の JSON（model / blend_root / control 付き）もそのまま読める")
-    func decodesMidistageJSON() throws {
+    @Test("lnx の JSON（model / blend_root / control 付き）もそのまま読める")
+    func decodesLnxJSON() throws {
         let json = """
         {"id":"numa","title":"Numa Compact X SE","model":"Numa Compact X SE","blend_root":"ncxse",
          "size":[1270,224,100],"body_height":45,

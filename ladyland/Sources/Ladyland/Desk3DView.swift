@@ -152,12 +152,12 @@ struct Desk3DView: View {
 final class Desk3DScene {
     /// 机・棚・環境光の置き場（アプリの産物。studio_export.py の出力）
     private let assetDirectory: URL
-    /// 機材の JSON / USDZ の置き場。midistage の配布物があればそれ（`GearAssets`）
+    /// 機材の JSON / USDZ の置き場。lnx の配布物があればそれ（`GearAssets`）
     private let gearAssetDirectory: URL
 
-    init(gearDirectory: URL = Desk3DScene.gearDirectory, midistageDirectory: URL = GearAssets.midistageDirectory) {
+    init(gearDirectory: URL = Desk3DScene.gearDirectory, lnxDirectory: URL = GearAssets.lnxDirectory) {
         assetDirectory = gearDirectory
-        gearAssetDirectory = GearAssets.gearDirectory(studio: gearDirectory, midistage: midistageDirectory)
+        gearAssetDirectory = GearAssets.gearDirectory(studio: gearDirectory, lnx: lnxDirectory)
     }
     /// 机の上の並び（`Gear/desk_layout.json` の写し。無ければ nanoKONTROL2 だけ）
     private(set) var layout = DeskLayout.fallback
@@ -221,7 +221,7 @@ final class Desk3DScene {
             layout = loaded
         }
         let catalog = Self.catalog(at: gearAssetDirectory)
-        // 机の配置は旧 ID（ncxse / fgdp50）のままでも、midistage の ID（numa / fgdp）で引ける
+        // 机の配置は旧 ID（ncxse / fgdp50）のままでも、lnx の ID（numa / fgdp）で引ける
         placedGears = layout.gear.compactMap { entry in
             GearAssets.lookup(catalog, id: entry.id).map { entry.placing($0) }
         }

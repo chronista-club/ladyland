@@ -2,7 +2,7 @@ import Testing
 import SwiftUI
 import AppKit
 import Foundation
-import MidistageClient
+import LnxClient
 @testable import Ladyland
 
 @Test func deviceHandoffDrainsHeldAndSustainedNotes() {
@@ -84,9 +84,9 @@ import MidistageClient
 }
 
 @Test func midiPlanUsesOnlyOwnedPortsAndIgnoresUnownedKeystage() {
-    let generic = "Midistage/ladyland/lease/4 | Studio Keyboard"
+    let generic = "Lnx/ladyland/lease/4 | Studio Keyboard"
     let physical = "Keystage KBD/CTRL"
-    let peer = "Midistage/vp/other/1 | Keystage KBD/CTRL"
+    let peer = "Lnx/vp/other/1 | Keystage KBD/CTRL"
     let plan = MIDIInput.plan(sourceNames: [physical, peer, generic], allowedSourceNames: [generic])
     #expect(plan == [MIDIConnectedSource(name: generic, route: .genericKeyboard)])
     #expect(MIDIInput.plan(sourceNames: [physical, peer], allowedSourceNames: []).isEmpty)
@@ -97,8 +97,8 @@ func midiSessionRevokesOnlyChangedDeviceAndRejectsDelayedSnapshots() async throw
     let session = MIDIUseSession()
     var started: [String] = []
     var stopped: [String] = []
-    session.onAcquired = { started.append($0.deviceID) }
-    session.onReleased = { stopped.append($0.deviceID) }
+    session.onAcquired = { started.append($0.gearID) }
+    session.onReleased = { stopped.append($0.gearID) }
     let first = try handoffSnapshot(sequence: 1, nanoPhase: "active")
     await session.apply(first)
     #expect(started == ["nano", "lpd"])
@@ -112,18 +112,18 @@ func midiSessionRevokesOnlyChangedDeviceAndRejectsDelayedSnapshots() async throw
     #expect(!session.access.allowsInput("nano input"))
 }
 
-private func handoffSnapshot(sequence: Int, nanoPhase: String) throws -> MidistageClient.Snapshot {
+private func handoffSnapshot(sequence: Int, nanoPhase: String) throws -> LnxClient.Snapshot {
     let device: (String, String, String) -> [String: Any] = { id, profile, phase in [
-        "device_id": id, "profile_id": profile, "name": profile, "present": true,
+        "gear_id": id, "profile_id": profile, "name": profile, "present": true,
         "assignment": ["client_id": "ladyland", "revision": 1, "expected": true],
         "phase": phase, "lease": ["session_id": "session", "token": id + "-lease"],
         "controls": [], "native_ports": ["inputs": [id + " input"], "outputs": [id + " output"]]
     ] }
     let data = try JSONSerialization.data(withJSONObject: [
         "sequence": sequence, "protocol_version": 1, "server_epoch": "test", "session_id": "session",
-        "devices": [device("nano", "nanokontrol", nanoPhase), device("lpd", "lpd8", "active")]
+        "gears": [device("nano", "nanokontrol", nanoPhase), device("lpd", "lpd8", "active")]
     ])
-    return try JSONDecoder().decode(MidistageClient.Snapshot.self, from: data)
+    return try JSONDecoder().decode(LnxClient.Snapshot.self, from: data)
 }
 
 // opt-in visual proof: renders only the settings view; never starts audio, MIDI, or a service.

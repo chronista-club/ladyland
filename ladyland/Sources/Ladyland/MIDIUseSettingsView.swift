@@ -1,10 +1,10 @@
 import SwiftUI
-import MidistageClient
+import LnxClient
 
 /// 機材ごとの使用意思。確認時に見た revision を渡し、他アプリの変更を上書きしない。
 struct MIDIUseSettingsView: View {
     @ObservedObject var session: MIDIUseSession
-    @State private var takeover: DeviceView?
+    @State private var takeover: GearView?
     @State private var failure: String?
     @State private var changing: Set<String> = []
 
@@ -61,7 +61,7 @@ struct MIDIUseSettingsView: View {
             Text("\(device.name) は \(device.assignment.clientID ?? "別のアプリ") に割り当てられています。現在の処理が終了してから切り替えます。")
         }
     }
-    private func status(_ device: DeviceView) -> String {
+    private func status(_ device: GearView) -> String {
         if let error = device.error { return "接続エラー: \(error)" }
         if device.phase == "releasing" { return "切り替え中…" }
         if device.configuring == true || (device.profileID == "roto" && session.rotoConfiguring) { return "設定を反映中…" }
@@ -76,7 +76,7 @@ struct MIDIUseSettingsView: View {
         if let owner = device.assignment.clientID { return "\(owner) に割り当て済み" }
         return "使用 OFF"
     }
-    private func change(_ device: DeviceView, enabled: Bool, takeover: Bool = false) {
+    private func change(_ device: GearView, enabled: Bool, takeover: Bool = false) {
         changing.insert(device.id)
         failure = nil
         Task {

@@ -81,14 +81,14 @@ final class RotoSetupSync: ObservableObject {
 
     private var ready: Bool {
         guard session.hasRotoLease, !session.rotoConfiguring,
-              let roto = session.devices.first(where: { $0.deviceID == "roto" }),
+              let roto = session.devices.first(where: { $0.gearID == "roto" }),
               roto.configuring == false else { return false }
         // サービスが示した設定エラーは人が全冊ボタンで再試行する。poll で撃ち続けない。
         return force || roto.configError == nil
     }
     private func currentIdentity() -> Identity? {
         guard session.hasRotoLease, let snapshot = session.snapshot,
-              let token = session.devices.first(where: { $0.deviceID == "roto" })?.lease?.token else { return nil }
+              let token = session.devices.first(where: { $0.gearID == "roto" })?.lease?.token else { return nil }
         return Identity(epoch: snapshot.serverEpoch, session: snapshot.sessionID, lease: token)
     }
     private func begin() {

@@ -1,7 +1,7 @@
 import Foundation
-import MidistageClient
+import LnxClient
 
-/// 冊全体の希望値。実機の読み戻しや席単位の差分は midistaged が担当する。
+/// 冊全体の希望値。実機の読み戻しや席単位の差分は lnx-server が担当する。
 struct RotoSetupPayload: Equatable, Sendable {
     let setup: Int
     let content: SetupContent

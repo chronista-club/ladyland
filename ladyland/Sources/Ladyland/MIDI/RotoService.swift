@@ -49,7 +49,7 @@ final class RotoService {
     /// 選択の波及（ルーティング / LED / 差分焼き / 保存）は AppState.select に
     /// 一本化されているため、ここでは番号を渡すだけ
     var onSelectTrack: ((Int) -> Void)?
-    /// Serial の所有者は midistaged。現在の lease を持つ窓口へ切替を依頼する。
+    /// Serial の所有者は lnx-server。現在の lease を持つ窓口へ切替を依頼する。
     var onSelectSetup: ((Int) async throws -> Void)?
 
     // ── MIDI モードのモーター同期（RotoMidiSync.swift）──

@@ -15,7 +15,7 @@ import AVFoundation
 import CoreMIDI
 import KeystageKit
 import Lpd8Kit
-import MidistageClient
+import LnxClient
 
 /// UMP（Universal MIDI Packet）の解析 — 純関数（テスト対象）
 enum UMP {
@@ -1140,9 +1140,9 @@ final class MIDIInput {
         guard status == noErr else { throw MIDIError.clientCreate(status) }
         connectSources()
     }
-    func updateDevices(_ snapshot: MidistageClient.Snapshot) {
-        deviceIDs = Dictionary(uniqueKeysWithValues: snapshot.devices.filter(snapshot.owns).flatMap { device in
-            device.nativeInputs.map { ($0, device.deviceID) }
+    func updateDevices(_ snapshot: LnxClient.Snapshot) {
+        deviceIDs = Dictionary(uniqueKeysWithValues: snapshot.gears.filter(snapshot.owns).flatMap { device in
+            device.nativeInputs.map { ($0, device.gearID) }
         })
         connectSources()
     }

@@ -1,5 +1,5 @@
 """編集済み studio を Ladyland へ渡す（机・棚の desk.usdz、environment.exr、desk_layout.json）。
-機材の USDZ / JSON は midistage の gear/build.py が書く。機材・家具の再生成、blend の保存はしない。
+機材の USDZ / JSON は lnx の gear/build.py が書く。機材・家具の再生成、blend の保存はしない。
 
 Blender --background --python ladyland/Gear/studio_export.py -- --output /tmp/studio-gear
 確認した出力を Application Support/ladyland/gear へ配置する。
@@ -217,13 +217,13 @@ def export_assets(source, output, bake=True):
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     layout = layout_from_scene(scene)
-    # 機材は midistage の配布物（~/Library/Application Support/midistage/gear/<id>.blend）を
-    # リンクする。機材の USDZ / JSON は midistage の build.py が書くので、ここでは書き出さない
+    # 機材は lnx の配布物（~/Library/Application Support/club.chronista.lnx-server/gear/<id>.blend）を
+    # リンクする。機材の USDZ / JSON は lnx の build.py が書くので、ここでは書き出さない
     for instance in gear_instances(scene):
         library = instance.instance_collection.library
         if library is None or not Path(bpy.path.abspath(library.filepath)).exists():
             raise ValueError(
-                f"機材は midistage の配布物 <id>.blend にリンクしてください（build.py を先に）: {instance.name}")
+                f"機材は lnx の配布物 <id>.blend にリンクしてください（build.py を先に）: {instance.name}")
     if set(layout["tray"]) != {"mixer", "trackKnobs"}:
         raise ValueError("mixer と trackKnobs の置き場を指定してください")
     output.mkdir(parents=True, exist_ok=True)

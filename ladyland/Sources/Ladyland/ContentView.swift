@@ -558,7 +558,7 @@ struct ContentView: View {
     /// サービスの設定状態。旧いローカルの影を「同期済み」として表示しない。
     @ViewBuilder
     private var rotoStatusFooter: some View {
-        let device = appState.midiUse.devices.first { $0.deviceID == "roto" }
+        let device = appState.midiUse.devices.first { $0.gearID == "roto" }
         Group {
             if device?.present != true {
                 Text("ROTO: 未接続").foregroundColor(theme.textTertiary)
