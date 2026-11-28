@@ -66,8 +66,8 @@ struct RotoSettingsView: View {
                             }
                             if let result = appState.rotoBurnResult ?? exportResult {
                                 Text(result)
-                                    .font(.caption)
-                                    .foregroundColor(Color.colorTextSecondary)
+                                    .font(LadylandFont.deskCaption)
+                                    .foregroundColor(theme.textSecondary)
                             }
                             Spacer()
                         }

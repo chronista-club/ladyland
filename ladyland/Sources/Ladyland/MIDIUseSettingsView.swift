@@ -1,37 +1,54 @@
-import SwiftUI
+import CreoUI
 import LnxClient
+import SwiftUI
 
 /// 機材ごとの使用意思。確認時に見た revision を渡し、他アプリの変更を上書きしない。
 struct MIDIUseSettingsView: View {
+    @Environment(\.creoTheme) private var theme
     @ObservedObject var session: MIDIUseSession
     @State private var takeover: GearView?
     @State private var failure: String?
     @State private var changing: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("このアプリで使う MIDI 機材").font(.headline)
+        VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
+            Text("このアプリで使う MIDI 機材")
+                .font(LadylandFont.deskHeading)
+                .foregroundStyle(theme.textPrimary)
             Text("OFF にすると、その機材の入力・LED・書き込みを停止します。結線と楽器の設定は保持されます。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(LadylandFont.deskCaption)
+                .foregroundStyle(theme.textSecondary)
             if !session.connected {
                 Label("MIDI サービスに接続していません", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+                    .font(LadylandFont.deskCaption)
+                    .foregroundStyle(theme.semanticWarningText)
             }
-            if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+            if let failure {
+                Text(failure)
+                    .font(LadylandFont.deskCaption)
+                    .foregroundStyle(theme.semanticErrorText)
+            }
             if let error = session.rotoSetupError {
-                Text("ROTO 設定エラー: \(error)").font(.caption).foregroundStyle(.red)
+                Text("ROTO 設定エラー: \(error)")
+                    .font(LadylandFont.deskCaption)
+                    .foregroundStyle(theme.semanticErrorText)
             }
             if session.devices.contains(where: { $0.profileID == "roto" && $0.setupOwners == nil }) {
                 Text("ROTO を使うには MIDI サービスの更新が必要です。サービスを更新してから Ladyland を再起動してください。")
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(LadylandFont.deskCaption)
+                    .foregroundStyle(theme.semanticWarningText)
             }
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(session.devices) { device in
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: CreoUITokens.spacingXs) {
                                 Text(device.name)
-                                Text(status(device)).font(.caption).foregroundStyle(.secondary)
+                                    .font(LadylandFont.deskBody)
+                                    .foregroundStyle(theme.textPrimary)
+                                Text(status(device))
+                                    .font(LadylandFont.deskCaption)
+                                    .foregroundStyle(theme.textSecondary)
                             }
                             Spacer()
                             if changing.contains(device.id) { ProgressView().controlSize(.small) }
@@ -45,13 +62,13 @@ struct MIDIUseSettingsView: View {
                                 .labelsHidden().toggleStyle(.switch)
                                 .accessibilityLabel("\(device.name) を Ladyland で使用")
                                 .disabled(!session.connected || changing.contains(device.id) || device.phase == "releasing")
-                        }.padding(.vertical, 10)
+                        }.padding(.vertical, CreoUITokens.spacingS)
                         Divider()
                     }
                 }
             }
         }
-        .padding(.top, 12)
+        .padding(.top, CreoUITokens.spacingM)
         .alert("Ladyland に切り替えますか？", isPresented: Binding(
             get: { takeover != nil }, set: { if !$0 { takeover = nil } }
         ), presenting: takeover) { device in

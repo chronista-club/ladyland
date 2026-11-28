@@ -100,11 +100,13 @@ final class PaneWindowController: ObservableObject {
 /// 切り離した面の中身 — サイドバーの `case` と同じ View
 private struct PaneContent: View {
     let pane: PaneID
-    @EnvironmentObject private var appState: AppState
+    @Environment(\.creoTheme) private var theme
 
     var body: some View {
         SurfaceContent(pane: pane)
+            .foregroundStyle(theme.textPrimary)
             .padding(CreoUITokens.spacingM)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(theme.surfaceBgBase)
     }
 }
