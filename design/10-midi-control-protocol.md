@@ -1,8 +1,8 @@
 # 10. アプリと MIDI コントローラーをつなぐ共通契約
 
-> **Status**: Draft — 共通サービス方式を採用
-> **Related**: design 09、`mem_1CfnVkncPrmfdQet3bNSmx`
-> **対象**: アプリ側 SDK、機材 adapter、接続・使用権 coordinator
+> **Status**: Draft — 共通サービス方式を採用（2026-11-27 `lnx-server` へ統合）
+> **Related**: design 09、`mem_1CfnVkncPrmfdQet3bNSmx`、`mem_1ChTKAVaEY4JhcPwSuBqPc`
+> **対象**: アプリ側 SDK（`LnxClient` / `lnx-client`）、機材 adapter（`lnx-gear`）、接続・使用権 coordinator（`lnx-server`）
 
 機材別 ON/OFF と引き継ぎを、アプリ間の共通契約にする。さらに同じ契約上で、機材の能力・入力操作・画面や LED への出力を扱う。Ladyland と VP は対等な参加アプリであり、どちらかの UI やドメイン名をプロトコルの必須概念にしない。
 
@@ -17,7 +17,7 @@
 
 ## 共通の語彙（草案）
 
-- `device_id`: 物理個体の安定した識別子。`profile_id`（ROTO / LPD8 等の機種）と分離し、複数ポートを束ねる。
+- `gear_id`（旧 `device_id`）: 物理個体の安定した識別子。`profile_id`（ROTO / LPD8 等の機種）と分離し、複数ポートを束ねる。
 - `client_id`: アプリの識別子。再起動で変わらない。接続ごとの `session_id` と分離する。
 - `capabilities`: `controls` の ID・kind（absolute / relative / button / note / touch）と、表示・色・motor 等の対応能力。持たない能力を偽装しない。
 - `presence`: detected / absent。使用設定や使用権とは独立。
@@ -51,27 +51,28 @@
 
 機材全体を使用権の単位とし、まず ROTO / LPD8 / nanoKONTROL の操作面を対象にする。鍵盤・FGDP も検出と使用設定の契約に含めるが、演奏イベントの追加 hop は timestamp と遅延の実測を通して導入する。音声ストリームをこのプロトコルで運ばない。
 
-VP の `midistage-profiles` には `DeviceInput::parse` と `DeviceProfile` の純粋変換がすでにある。既存 `midistage` は CoreMIDI / UMP と Keystage 設定ツールを持つ。これらを再利用候補として確認し、Ladyland の ROTO 実機知見・送信ペーシングを失わない。
+`lnx-gear`（旧 `midistage-profiles`）には `GearInput::parse` と `GearProfile` の純粋変換がある。これらを共有し、Ladyland の ROTO 実機知見・送信ペーシングを失わない。
 
 ## 配置の分岐
 
-共通サービスが実機接続と adapter を持ち、アプリはプロトコル client になる方式を採用。正本は midistage repository の schemas / docs に置く。design 09 の各アプリ直接接続 + flock 案は採用しない。
+共通サービス（`lnx-server`、旧 `midistaged`）が実機接続と adapter を持ち、アプリはプロトコル client（`LnxClient` / `lnx-client`）になる方式を採用。正本は `lnx` repository の `schemas/gear.kdl` と `docs/design/` に置く。design 09 の各アプリ直接接続 + flock 案は採用しない。
 
 ## Status log
 
 - 2026-10-07: 「これprotocolとして纏まってると良くない？」「アプリ<->MIDIコン間連携が楽になる」を受け、使用権に加えて能力・操作・表示を共通契約として整理。配置の選択に依存する実装は保留し、既存変換層を調査。
 - 2026-10-07: 「それでいこう」、repo / crate 分割への「OK」で共通サービス方式を承認。midistage を正本、Ladyland / VP を利用側として実装開始。
+- 2026-11-27: `midistage`・`maru`・`lnx` を統合し、`lnx-server` を唯一の Signal Hub + Router にする 6 Steps を完遂（PR #62, #63）。語彙を `Gear`（`gear_id` / `GearView` / `Lnx/…` 仮想ポート）に統一し、接続先を `~/Library/Application Support/club.chronista.lnx-server/endpoint.json` に切り替え。
 
-### 利用側の実装（2026-10-07）
+### 利用側の実装（2026-10-07 / 2026-11-27 更新）
 
 設定の「MIDI 機材」で機材ごとに使用 ON/OFF を保存し、別アプリの担当機材は確認後に切り替える。
-MIDIUseSession が midistaged の lease を受け取り、MIDIInput / SysEx / LED は所有中の仮想ポートだけを使う。
+`MIDIUseSession` が `lnx-server` の lease を受け取り、`MIDIInput` / SysEx / LED は所有中の仮想ポート（`Lnx/<client>/<lease>/<uid> | <port>`）だけを使う。
 サービス未接続時に物理ポートへフォールバックしない。Jack の結線、楽器、編集中の LPD8 プログラムは保持する。
 解放時は機材ごとの保持音・sustain を整理し、LPD8 GET/SET の再試行、遅延 MIDI、ROTO serial 作業、Keystage 作業を止めて終了を待つ。
 Keystage の途中の接続モードは共通サービスが物理送信完了を追跡して解除する。
 
-関連307テストと、音声/MIDIを起動しない SwiftUI 描画で確認済み。物理機材の入力・音・LED・画面とアプリ間の往復は実機確認待ち。
-Field と MIDI SDK が使う Unison は同じ GitHub package / 2.0.0 に統一し、local/remote の package identity 衝突を避ける。
+関連テストと、音声/MIDIを起動しない SwiftUI 描画で確認済み。物理機材の入力・音・LED・画面とアプリ間の往復は実機確認待ち。
+Field と `LnxClient` が使う Unison は同じ GitHub package（`club-unison` 2.3.0+）に統一し、local/remote の package identity 衝突を避ける。
 
 ### 終了・再起動（2026-10-08）
 
