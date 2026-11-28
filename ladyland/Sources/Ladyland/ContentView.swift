@@ -166,11 +166,11 @@ struct ContentView: View {
     /// 分かる方が大事
     private func splitterColor(at date: Date) -> Color {
         // 掴んでいないときは Divider と同じ控えめな線に見せる
-        guard draggingWidth != nil else { return Color.colorTextTertiary.opacity(0.3) }
+        guard draggingWidth != nil else { return theme.textTertiary.opacity(0.3) }
         let bpm = max(appState.clockBPM ?? 120, 1)
         let beat = date.timeIntervalSince1970 / (60.0 / bpm)
         let onBeat = beat - beat.rounded(.down) < 0.5
-        return onBeat ? Color.colorBrandPrimary : Color.colorBrandPrimarySubtle
+        return onBeat ? theme.brandPrimary : theme.brandPrimarySubtle
     }
 
     private var splitterDrag: some Gesture {

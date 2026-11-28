@@ -9,10 +9,10 @@ struct XTouchSurfaceView: View {
 
     var body: some View {
         ScrollView(.vertical) {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
             HStack {
                 Text("X-Touch / Mixer Surface").font(LadylandFont.deskHeading)
-                Spacer(minLength: 8)
+                Spacer(minLength: CreoUITokens.spacingS)
                 Button(showingAssignments ? "操作面に戻る" : "割当一覧") {
                     showingAssignments.toggle()
                 }.controlSize(.small)
@@ -31,7 +31,7 @@ struct XTouchSurfaceView: View {
             if let error = controller.error {
                 Text(error).font(LadylandFont.deskCaption).foregroundStyle(theme.semanticError)
             }
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: CreoUITokens.spacingS) {
                 GeometryReader { geometry in
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 6) {
@@ -51,7 +51,7 @@ struct XTouchSurfaceView: View {
                     XTouchFader(value: Binding(get: { rack.masterGain }, set: { controller.setMaster($0) }), label: "Master 音量")
                     Text(String(format: "%.0f%%", rack.masterGain * 100)).monospacedDigit()
                 }.font(LadylandFont.deskCaption).frame(width: 64)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, CreoUITokens.spacingS)
             }
             if controller.bank.pending != 0 {
                 Text("フェーダーから手を離すと担当Trackが切り替わります")
@@ -61,11 +61,11 @@ struct XTouchSurfaceView: View {
                 .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
             }
             Spacer(minLength: 0)
-        }.padding(12)
+        }.padding(CreoUITokens.spacingM)
         }
     }
     private var assignments: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
             Text("左8列の担当はBANK / CHANNELで移動します。SELECTを押すまで選択Trackは変わりません。")
                 .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
             ForEach([true, false], id: \.self) { assigned in
@@ -86,10 +86,10 @@ struct XTouchSurfaceView: View {
         }
     }
     private var navigation: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
             Text("T\(controller.bank.start + 1)–T\(min(controller.bank.start + 8, rack.slots.count)) / \(rack.slots.count) Tracks")
                 .font(LadylandFont.deskHeading).monospacedDigit()
-            HStack(spacing: 12) {
+            HStack(spacing: CreoUITokens.spacingM) {
                 HStack(spacing: 4) {
                     step("BANK −8", delta: -8)
                     step("BANK +8", delta: 8)
@@ -115,7 +115,7 @@ private struct XTouchChannelStrip: View {
     let onChange: () -> Void
     var width: CGFloat = 70
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: CreoUITokens.spacingS) {
             Rectangle().fill(slot.rotoColor.map(RotoPaletteMap.color) ?? theme.brandPrimary).frame(height: 3)
             Text("T\(slot.index + 1)").font(LadylandFont.deskHeading)
             Text(slot.trackName ?? "空き").lineLimit(1).help(slot.trackName ?? "空き")
@@ -132,7 +132,7 @@ private struct XTouchChannelStrip: View {
             action("Select", active: selected, onSelect)
         }
         .font(LadylandFont.deskCaption)
-        .padding(.horizontal, 5).padding(.bottom, 8)
+        .padding(.horizontal, 5).padding(.bottom, CreoUITokens.spacingS)
         .frame(width: width)
         .background(selected ? theme.surfaceBgEmphasis : theme.surfaceSurface)
     }
@@ -155,7 +155,7 @@ private struct XTouchFader: View {
             ZStack(alignment: .bottom) {
                 Capsule().fill(theme.surfaceBgEmphasis).frame(width: 4)
                 Capsule().fill(theme.brandPrimary).frame(width: 4, height: geometry.size.height * CGFloat(value))
-                RoundedRectangle(cornerRadius: 3).fill(theme.textPrimary)
+                RoundedRectangle(cornerRadius: CreoUITokens.radiusXs).fill(theme.textPrimary)
                     .frame(width: 26, height: 10)
                     .offset(y: -(geometry.size.height - 10) * CGFloat(value))
             }.frame(maxWidth: .infinity, maxHeight: .infinity)

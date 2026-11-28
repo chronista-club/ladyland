@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 import Foundation
 import LnxClient
+import CreoUI
 @testable import Ladyland
 
 @Test func deviceHandoffDrainsHeldAndSustainedNotes() {
@@ -124,6 +125,29 @@ private func handoffSnapshot(sequence: Int, nanoPhase: String) throws -> LnxClie
         "gears": [device("nano", "nanokontrol", nanoPhase), device("lpd", "lpd8", "active")]
     ])
     return try JSONDecoder().decode(LnxClient.Snapshot.self, from: data)
+}
+
+// mem_1ChUjvT4SKW9ZDrpyYA77A
+@Test @MainActor
+func midiSettingsTextUsesActiveCreoTheme() throws {
+    let session = MIDIUseSession()
+    func render(_ theme: CreoTheme) throws -> Data {
+        let renderer = ImageRenderer(content: MIDIUseSettingsView(session: session)
+            .frame(width: 640, height: 240)
+            .environment(\.colorScheme, .dark)
+            .creoTheme(theme))
+        let image = try #require(renderer.cgImage)
+        return try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+    }
+
+    let theme = CreoTheme.mintDark
+    let original = try render(theme)
+    for role in [\CreoTheme.textPrimary, \CreoTheme.textSecondary, \CreoTheme.semanticWarningText] {
+        var changed = theme
+        changed[keyPath: role] = .pink
+        let updated = try render(changed)
+        #expect(updated != original, "MIDI settings should render the active color for \(role)")
+    }
 }
 
 // opt-in visual proof: renders only the settings view; never starts audio, MIDI, or a service.
