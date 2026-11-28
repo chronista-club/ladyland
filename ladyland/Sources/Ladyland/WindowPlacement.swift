@@ -22,11 +22,12 @@ enum WindowMode: String, Codable, CaseIterable {
 }
 
 enum WorkspaceTab: String, Codable, CaseIterable {
-    case play, mixer, studio
+    case play, story, mixer, studio
 
     var title: String {
         switch self {
         case .play: "Play"
+        case .story: SurfaceTab.story.title
         case .mixer: "Mixer"
         case .studio: "Studio"
         }
@@ -35,6 +36,7 @@ enum WorkspaceTab: String, Codable, CaseIterable {
     var icon: String {
         switch self {
         case .play: "pianokeys.inverse"
+        case .story: SurfaceTab.story.icon
         case .mixer: "slider.horizontal.3"
         case .studio: "cable.connector"
         }
@@ -43,6 +45,7 @@ enum WorkspaceTab: String, Codable, CaseIterable {
     var paneID: PaneID? {
         switch self {
         case .play: nil
+        case .story: .story
         case .mixer: .xtouch
         case .studio: .jack
         }
@@ -59,7 +62,7 @@ enum WorkspaceTab: String, Codable, CaseIterable {
 /// デバイスの設定）。**それは面という枠組みでは自然なこと**なので、
 /// 見出しで性格を出し分ける必要は無い — タブが機材名を出している
 enum SurfaceTab: String, Codable, CaseIterable {
-    case track, mixer, xtouch, roto, keystage, lpd8, jack
+    case track, mixer, xtouch, roto, keystage, lpd8, jack, story
 
     static let gearTabs: [Self] = [.roto, .keystage, .lpd8]
 
@@ -78,6 +81,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .mixer: return "Mixer"
         case .xtouch: return "X-Touch"
         case .jack: return "Jack"
+        case .story: return "Story"
         }
     }
 
@@ -106,6 +110,7 @@ enum SurfaceTab: String, Codable, CaseIterable {
         case .xtouch: return "slider.horizontal.3"
         // Jack = 結線 — ケーブルの差込口そのもの
         case .jack: return "cable.connector"
+        case .story: return "waveform.path.ecg"
         }
     }
 }
@@ -155,11 +160,12 @@ struct WindowPreferences: Codable, Equatable {
 /// Track は選択に張り付く面なので対象外。⚠️ raw 値は `window.json` に入る —
 /// `SurfaceTab` と同じく**追加は安全・改名は危険**（テストで固定）
 enum PaneID: String, Codable, CaseIterable {
-    case jack, keystage, lpd8, roto, mixer, xtouch
+    case jack, keystage, lpd8, roto, mixer, xtouch, story
 
     init?(surface: SurfaceTab) {
         switch surface {
         case .jack: self = .jack
+        case .story: self = .story
         case .keystage: self = .keystage
         case .lpd8: self = .lpd8
         case .roto: self = .roto
@@ -172,6 +178,7 @@ enum PaneID: String, Codable, CaseIterable {
     var surface: SurfaceTab {
         switch self {
         case .jack: return .jack
+        case .story: return .story
         case .keystage: return .keystage
         case .lpd8: return .lpd8
         case .roto: return .roto
@@ -187,6 +194,7 @@ enum PaneID: String, Codable, CaseIterable {
         switch self {
         // Jack は結線図 + 机（2.5D）が縦に並ぶ
         case .jack: return CGSize(width: 960, height: 900)
+        case .story: return CGSize(width: 940, height: 700)
         case .keystage, .lpd8, .roto: return CGSize(width: 720, height: 640)
         // 8 本のストリップ（64pt + 間隔）が横に収まる幅
         case .mixer: return CGSize(width: 640, height: 360)
@@ -197,6 +205,7 @@ enum PaneID: String, Codable, CaseIterable {
     var minimumSize: CGSize {
         switch self {
         case .jack: return CGSize(width: 720, height: 400)
+        case .story: return CGSize(width: 720, height: 420)
         case .keystage, .lpd8, .roto: return CGSize(width: 480, height: 400)
         case .mixer: return CGSize(width: 600, height: 280)
         case .xtouch: return CGSize(width: 600, height: 500)

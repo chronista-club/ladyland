@@ -7,7 +7,7 @@ import Testing
 
 @Suite("中央ワークスペースと Inspector")
 struct WorkspaceLayoutTests {
-    @Test("window.json はワークスペースの選択を保持する", arguments: ["play", "mixer", "studio"])
+    @Test("window.json はワークスペースの選択を保持する", arguments: ["play", "story", "mixer", "studio"])
     func workspaceSelectionSurvivesRoundTrip(selection: String) throws {
         let json = Data("""
             {"mode":"windowed","assignTab":"lpd8","drumPaneExpanded":true,"workspaceTab":"\(selection)"}
@@ -48,8 +48,8 @@ struct WorkspaceLayoutTests {
     @Test("中央タブには別々の SF Symbol と対応するポップアウトがある")
     func workspacePresentation() {
         let tabs = WorkspaceTab.allCases
-        #expect(tabs.map(\.title) == ["Play", "Mixer", "Studio"])
-        #expect(tabs.map(\.paneID) == [nil, .xtouch, .jack])
+        #expect(tabs.map(\.title) == ["Play", "Story", "Mixer", "Studio"])
+        #expect(tabs.map(\.paneID) == [nil, .story, .xtouch, .jack])
         #expect(Set(tabs.map(\.icon)).count == tabs.count)
         for tab in tabs {
             #expect(NSImage(systemSymbolName: tab.icon, accessibilityDescription: nil) != nil)

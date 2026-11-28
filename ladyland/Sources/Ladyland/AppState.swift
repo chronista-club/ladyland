@@ -10,6 +10,7 @@ import Combine
 import KeystageKit
 import Lpd8Kit
 import RotoKit
+import StoryKit
 import SwiftUI
 import UniformTypeIdentifiers
 import notify
@@ -21,6 +22,8 @@ final class AppState: ObservableObject {
     let editors = PluginEditorWindows()
     let settings = SettingsWindowController()
     let faceKnobs = FaceKnobController()
+    @Published private(set) var storyController = PatternStoryController()
+    private let storyAudio = StoryAudioOutput()
     /// LPD8 ノブ → ドラムスロットの顔つまみ（Keystage 側と独立のピックアップ）
     let drumFaceKnobs = FaceKnobController()
     /// 鍵盤 2（NCXse）→ 担当スロットの顔つまみ（ModWheel 席の駆動先。
@@ -319,6 +322,7 @@ final class AppState: ObservableObject {
     private var trackNav = TrackNavThrottle()
 
     init() {
+        configureStory()
         // 入れ子 ObservableObject の変更転送: rack.selected 等の変更を
         // AppState の変更として View に届ける（SwiftUI は nested な
         // @Published の変更を自動では観測しない）
@@ -702,7 +706,8 @@ final class AppState: ObservableObject {
             let input = MIDIInput(router: router, access: midiUse.access)
             input.onXTouch = { [weak self] status, a, b in
                 guard let event = XTouchMCU.decode(status, a, b) else { return }
-                self?.xtouch.handle(event)
+                if case let .transport(action) = event { self?.transport(action) }
+                else { self?.xtouch.handle(event) }
             }
             try input.start()
             midi = input
@@ -1362,27 +1367,84 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func configureStory() {
+        storyController.tempo = { [weak self] in
+            self?.rack.hostTempo.bpm ?? self?.clockBPM ?? 120
+        }
+        storyController.sendNote = { [weak self] track, note, velocity in
+            guard let self, rack.slots.indices.contains(track) else { return }
+            rack.slots[track].sendMIDI([velocity == 0 ? 0x80 : 0x90, note, velocity])
+        }
+        storyController.setParameter = { [weak self] track, knob, value in
+            guard let self, rack.slots.indices.contains(track) else { return }
+            if rack.selected == track {
+                faceKnobs.applyStoryValue(value, knob: knob)
+            } else {
+                FaceKnobController.applyStoryValue(value, knob: knob, in: rack.slots[track])
+            }
+        }
+        storyController.updateAudio = { [weak self] clips, bpm in
+            guard let self else { return }
+            storyAudio.update(clips, bpm: bpm, rack: rack)
+        }
+        storyController.recordingChanged = { [weak self] recording in
+            guard let self else { return }
+            rack.hostTempo.recordArmed = recording
+            refreshTransportReadout()
+            if recording {
+                router.observeNotes { [weak self] track, status, note, velocity, source, time in
+                    DispatchQueue.main.async {
+                        self?.storyController.captureNote(track: track, status: status, note: note,
+                            velocity: velocity, source: source, time: time)
+                    }
+                }
+            } else {
+                router.observeNotes(nil)
+            }
+        }
+        let knobInput: (Int, Int, Float) -> Bool = { [weak self] track, seat, value in
+            guard let self, let position = KnobPages.index(forCC: seat) else { return false }
+            return storyController.knobInput(track: track, seat: seat, position: position, value: value)
+        }
+        faceKnobs.onInput = knobInput
+        secondFaceKnobs.onInput = knobInput
+        miniLabFaceKnobs.onInput = knobInput
+        roto.onStoryKnob = knobInput
+        Publishers.CombineLatest3(storyController.$sculptsWithKnobs, storyController.$selectedPatternID,
+                                  storyController.$document)
+            .map { enabled, id, document -> [Double] in
+                guard enabled, let id, let pattern = document.pattern(id),
+                      case let .parametric(rule, _) = pattern.kind else { return [] }
+                return rule.knobPositions
+            }
+            .removeDuplicates()
+            .sink { [weak self] values in self?.roto.storyKnobValues = values }
+            .store(in: &cancellables)
+        storyController.beginMonitoring()
+    }
+
     // MARK: - トランスポート（design/11。mako 裁定 2026-10-09「Aで進めよう」）
 
-    /// 機材に依存しないトランスポートの口。**Play はエンジンを動かさない** —
-    /// 再生中 = エンジンが回っている、で既に真。PLAY = 小節の頭を宣言、
-    /// STOP = パニック + 拍を 0 へ、REC = 録音待機のトグル、<< >> = 小節単位で
-    /// 頭を置き直す（フレーズの中の位置をずらす。スロット移動は TRACK ◀▶ の仕事）
+    /// 機材・Story Pane が共有するトランスポート。PLAY は AU に小節の頭を宣言し、
+    /// Story を再生する。STOP は拍を戻して発音を解放し、REC はテイクを開始／確定する。
     func transport(_ action: TransportAction) {
         switch action {
         case .play:
             rack.hostTempo.declareDownbeat()
+            storyController.start()
             NSLog("transport: PLAY — 小節の頭を宣言")
         case .stop:
             rack.hostTempo.resetBeat()
             panic()
         case .record:
-            rack.hostTempo.recordArmed.toggle()
-            NSLog("transport: REC 待機 %@", rack.hostTempo.recordArmed ? "on" : "off")
+            storyController.toggleRecord()
+            NSLog("transport: REC %@", rack.hostTempo.recordArmed ? "on" : "off")
         case .rewind:
             rack.hostTempo.shiftDownbeat(bars: -1)
+            storyController.seek(to: storyController.currentBeat - StoryDocument.beatsPerBar)
         case .fastForward:
             rack.hostTempo.shiftDownbeat(bars: 1)
+            storyController.seek(to: storyController.currentBeat + StoryDocument.beatsPerBar)
         }
         refreshTransportReadout()
     }
@@ -1689,6 +1751,7 @@ final class AppState: ObservableObject {
     /// パニック（Esc）— 全スロットへ All Notes Off + キープの解除。
     /// **ライブの最後の砦**。原因が何であれ、音が残ったらこれで止められる
     func panic() {
+        storyController.stop()
         router.panic()
         for slot in rack.slots where slot.audioUnit != nil {
             slot.allNotesOff()
@@ -1813,7 +1876,7 @@ final class AppState: ObservableObject {
         let synth1Slot =
             synthInput1Slot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil }
             ?? slot
-        router.setKeyboardTarget(synth1Slot.audioUnit as? AVAudioUnitMIDIInstrument)
+        router.setKeyboardTarget(synth1Slot.audioUnit as? AVAudioUnitMIDIInstrument, track: synth1Slot.index)
         router.setDrumsTarget(rack.drumSlot.audioUnit as? AVAudioUnitMIDIInstrument)
 
         // ROTO の面も塗り直す（選択・ロード・割当の変更はすべてここを通る）
@@ -1827,7 +1890,7 @@ final class AppState: ObservableObject {
         let secondSlot =
             secondKeyboardSlot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil }
             ?? slot
-        router.setSecondKeyboardTarget(secondSlot.audioUnit as? AVAudioUnitMIDIInstrument)
+        router.setSecondKeyboardTarget(secondSlot.audioUnit as? AVAudioUnitMIDIInstrument, track: secondSlot.index)
         // ModWheel 席などの駆動先も**担当スロットの割当**を見る（選択と割れて
         // いても正しい席へ。`drumFaceKnobs` と同じ作法）
         secondFaceKnobs.focus(secondSlot)
@@ -1843,7 +1906,7 @@ final class AppState: ObservableObject {
         }
 
         let miniSlot = miniLabSlot.flatMap { rack.slots.indices.contains($0) ? rack.slots[$0] : nil } ?? slot
-        router.setSecondKeyboardTarget(miniSlot.audioUnit as? AVAudioUnitMIDIInstrument, input: .miniLab)
+        router.setSecondKeyboardTarget(miniSlot.audioUnit as? AVAudioUnitMIDIInstrument, input: .miniLab, track: miniSlot.index)
         miniLabFaceKnobs.focus(miniSlot)
         let miniCCs = Set(miniSlot.knobMappings.compactMap { UInt8(exactly: $0.knob) })
             .intersection(secondReachable)

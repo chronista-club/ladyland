@@ -364,6 +364,8 @@ struct ContentView: View {
                 thumbnail: appState.thumbnails.image(for: appState.rack.selectedSlot),
                 onOpenWindow: { appState.openEditor(for: appState.rack.selectedSlot) }
             )
+        case .story:
+            embeddedPane(.story)
         case .mixer:
             embeddedPane(.xtouch)
         case .studio:

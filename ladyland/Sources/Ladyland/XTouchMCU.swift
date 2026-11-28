@@ -5,6 +5,7 @@ enum XTouchMCU {
     enum Event: Equatable {
         case fader(Int, Float), pan(Int, Int), mute(Int), solo(Int), select(Int)
         case move(Int), touch(Int, Bool), centerPan(Int)
+        case transport(TransportAction)
     }
     static func decode(_ status: UInt8, _ a: UInt8, _ b: UInt8) -> Event? {
         guard a < 128, b < 128 else { return nil }
@@ -19,6 +20,7 @@ enum XTouchMCU {
         let down = status == 0x90 && b != 0
         if (0x68...0x70).contains(a) { return .touch(Int(a - 0x68), down) }
         guard down else { return nil }
+        if let action = Transport.action(mackieNote: a, velocity: b) { return .transport(action) }
         switch a {
         case 0x08...0x0f: return .solo(Int(a - 8))
         case 0x10...0x17: return .mute(Int(a - 0x10))

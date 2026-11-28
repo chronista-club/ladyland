@@ -21,7 +21,7 @@ enum XTouchAssignments {
         .init(id: "master", control: "MASTER", action: "ドラムを含む全体音量。Bankを移動しても担当は変わらない", notes: nil, assigned: true),
         .init(id: "touch", control: "フェーダータッチ", action: "触れている間はモーター送信を止め、Bank移動を保留", notes: nil, assigned: true),
         .init(id: "rec", control: "REC ×8", action: "役割は検討中。録音待機・録音開始はまだ行わない", notes: 0x00...0x07, assigned: false),
-        .init(id: "transport", control: "Transport", action: "REW / FF / STOP / PLAY / REC", notes: nil, assigned: false),
+        .init(id: "transport", control: "Transport", action: "Story の小節移動・停止・再生・録音", notes: Transport.mackieNotes, assigned: true),
         .init(id: "assign", control: "ASSIGN / F1–F8", action: "ノブの役割切替・機能キー", notes: nil, assigned: false),
         .init(id: "automation", control: "Automation / 修飾キー", action: "READ / WRITEなど・SHIFT / OPTIONなど", notes: nil, assigned: false),
         .init(id: "navigation", control: "カーソル / ジョグ", action: "ZOOM / SCRUBを含む移動操作", notes: nil, assigned: false),
