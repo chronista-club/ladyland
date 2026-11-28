@@ -31,8 +31,8 @@ struct ContentView: View {
         nonmutating set { appState.windowPlacement.assignSidebarExpanded = newValue }
     }
 
-    private var assignTab: SurfaceTab {
-        get { appState.windowPlacement.assignTab }
+    private var inspectorTab: SurfaceTab {
+        get { appState.windowPlacement.assignTab.inspectorTab }
         nonmutating set { appState.windowPlacement.assignTab = newValue }
     }
 
@@ -41,12 +41,6 @@ struct ContentView: View {
     private var debugLogExpanded: Bool {
         get { appState.windowPlacement.debugLogExpanded }
         nonmutating set { appState.windowPlacement.debugLogExpanded = newValue }
-    }
-
-    /// Main 右列に LPD8（ドラム席）の楽器を並べるか（mako 要望 2026-08-06）
-    private var drumPaneExpanded: Bool {
-        get { appState.windowPlacement.drumPaneExpanded }
-        nonmutating set { appState.windowPlacement.drumPaneExpanded = newValue }
     }
 
     // タイル並び替え（design/06 §8 追補）: バッジを掴むと Lane 上に
@@ -63,7 +57,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                mainArea
+                mainColumn
                 assignArea
             }
             // Editor Mode の overlay（D-6 非侵襲 — Content の layout を変えず
@@ -72,9 +66,7 @@ struct ContentView: View {
                 EditorOverlay()
             }
         }
-        // 右列（470pt）を開くぶん最小幅を広げる — 開いたまま 1280 だと
-        // 左列が潰れる。畳めば従来どおり
-        .frame(minWidth: drumPaneExpanded ? 1760 : 1280, minHeight: 420)
+        .frame(minWidth: WindowPlacement.minimumSize.width, minHeight: WindowPlacement.minimumSize.height)
         // 背景はウィンドウサイズに常に追随させる（mako 裁定 2026-08-01 —
         // フルスクリーン時に上下へ素のウィンドウ背景が見えていた）
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,44 +101,57 @@ struct ContentView: View {
     ///
     /// ドラッグ中は **BPM に合わせて点滅**する。テンポが目に入る場所が
     /// 増えるほど、演奏中に「今どのくらいか」を確かめる手間が減る
-    /// **面のタブ**（mako 要望 2026-08-07「FontIcon みたいなところから
-    /// アイコン選んで、Surface っぽいのに置き換えできる？」）。
-    ///
-    /// ⚠️ **`Picker(.segmented)` をやめて自前で組んでいる。**
-    /// macOS の segmented control は `Label` を渡しても**アイコンを落として
-    /// 文字だけ描く**（実測 2026-08-07: 210pt で `Label` 版と `Text` 版を並べて
-    /// 撮り、完全に同一だった）。SwiftUI 側の指定では変えられないので、
-    /// アイコンを出すには自前で並べるしかない。
-    ///
-    /// 選択中は `surfaceBgEmphasis` で塗る — 割当パネルの行選択
-    /// （`RotoSettingsView.slotRow`）と**同じ表現**にして、面の中で
-    /// 「選ばれているもの」の見え方を 1 つにする
-    private var surfaceTabs: some View {
+    private var inspectorTabs: some View {
         HStack(spacing: 2) {
-            ForEach(SurfaceTab.allCases, id: \.self) { tab in
-                let selected = assignTab == tab
-                HStack(spacing: 4) {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: 11))
-                        // ⚠️ **アイコンの幅を固定する** — `pianokeys` は横長、
-                        // `dial` は正方形なので、素のままだと文字の開始位置が
-                        // タブごとにずれて「揃っていない」ように見える
-                        .frame(width: 14)
-                    Text(tab.title)
-                        .font(LadylandFont.deskCaption)
-                }
-                .foregroundColor(selected ? theme.textPrimary : theme.textSecondary)
-                .padding(.vertical, 3)
-                .padding(.horizontal, CreoUITokens.spacingS)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(selected ? theme.surfaceBgEmphasis : Color.clear)
-                )
-                .contentShape(Rectangle())
-                .onTapGesture { assignTab = tab }
-                .help(tab.title)
+            tabButton(SurfaceTab.track.title, icon: SurfaceTab.track.icon, selected: inspectorTab == .track) {
+                inspectorTab = .track
+            }
+            tabButton("Gear", icon: "gearshape", selected: inspectorTab != .track) {
+                if inspectorTab == .track { inspectorTab = .roto }
             }
         }
+    }
+
+    private var gearTabs: some View {
+        HStack(spacing: 2) {
+            ForEach(SurfaceTab.gearTabs, id: \.self) { tab in
+                tabButton(tab.title, icon: tab.icon, selected: inspectorTab == tab) {
+                    inspectorTab = tab
+                }
+            }
+            Spacer(minLength: 0)
+            if let pane = PaneID(surface: inspectorTab) {
+                panePopOutButton(pane)
+            }
+        }
+    }
+
+    private func tabButton(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .frame(width: 14)
+                Text(title).font(LadylandFont.deskCaption)
+            }
+            .foregroundStyle(selected ? theme.textPrimary : theme.textSecondary)
+            .padding(.vertical, 3)
+            .padding(.horizontal, CreoUITokens.spacingS)
+            .background(selected ? theme.surfaceBgEmphasis : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func panePopOutButton(_ pane: PaneID) -> some View {
+        Button { appState.panes.open(pane, appState: appState) } label: {
+            Image(systemName: "macwindow.badge.plus")
+                .foregroundStyle(theme.textSecondary)
+        }
+        .buttonStyle(.borderless)
+        .help("別ウィンドウで開く")
+        .accessibilityLabel("\(pane.title) を別ウィンドウで開く")
     }
 
     private var splitter: some View {
@@ -205,20 +210,7 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: CreoUITokens.spacingS) {
                     HStack {
-                        // **面**（mako 裁定 2026-08-06）。タブが機材名を出して
-                        // いるので、見出しで性格を出し分ける必要は無い
-                        Text("面")
-                            .font(LadylandFont.bodyBold)
-                        surfaceTabs
-                        // 面を別ウィンドウへ（広い画面で設定する。mako 火花 2026-09-12）
-                        if let pane = PaneID(surface: assignTab) {
-                            Button { appState.panes.open(pane, appState: appState) } label: {
-                                Image(systemName: "macwindow.badge.plus")
-                                    .foregroundColor(theme.textSecondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("別ウィンドウで開く")
-                        }
+                        inspectorTabs
                         Spacer()
                         // ROTO の SMART ページ（⌥←→ と同じ。ROTO 本体の
                         // ボタンは MIDI を送らないので、繰れるのはここだけ）
@@ -249,18 +241,10 @@ struct ContentView: View {
                         .buttonStyle(.borderless)
                         .help("rail に畳む")
                     }
-                    switch assignTab {
-                    case .keystage, .lpd8, .roto, .jack, .mixer, .xtouch:
-                        // 機材 3 面 + Jack + Mixer は**切り離せる**（PaneWindows）。中身は
-                        // SurfaceContent に 1 か所 — サイドバーと別ウィンドウで同じ View
-                        if let pane = PaneID(surface: assignTab) {
-                            if appState.panes.isOpen(pane) {
-                                DetachedPaneStub(pane: pane)
-                            } else {
-                                SurfaceContent(pane: pane)
-                            }
-                        }
-                    case .track:
+                    if let pane = PaneID(surface: inspectorTab) {
+                        gearTabs
+                        embeddedPane(pane)
+                    } else {
                         // 席そのもの（名前・カラー・ミュート・gain）— 機材 3 面と
                         // 違い、選択中のトラックのアイデンティティを編集する
                         TrackEditPanel(
@@ -307,7 +291,7 @@ struct ContentView: View {
                             .foregroundColor(theme.textSecondary)
                     }
                     .buttonStyle(.borderless)
-                    .help("面を開く（Keystage / LPD8 / ROTO — 選択トラックに追従）")
+                    .help("Inspector を開く")
                     Spacer()
                 }
                 .padding(.vertical, CreoUITokens.spacingM)
@@ -343,76 +327,63 @@ struct ContentView: View {
         }
     }
 
-    private var mainArea: some View {
-        // ⚠️ **Main を縦分割する**（mako 要望 2026-08-06「左に既存ビュー、
-        // 右に LPD8 のビュー（まずはサンプラ）のプラグインを並列で表示したい」）。
-        //
-        // 本番は**両手で弾く** — 鍵盤（左列の focus pane）と LPD8（右列）。
-        // 持ち替えで左は入れ替わるが、**右は居座る**（ドラム席は選択の影響を
-        // 受けない = docs/live-setup §3 の「持ち替えの影響を受けない」がそのまま
-        // 画面の形になる）
-        HStack(spacing: 0) {
-            mainColumn
-            if drumPaneExpanded {
-                Divider()
-                drumColumn
-            }
-        }
-    }
-
-    /// Main 右列 — **LPD8（ドラム席）の楽器**。まずはサンプラー。
-    ///
-    /// ⚠️ 左列の focus pane と**同じ custody 機構で同時に借りる**。
-    /// `selectedSlot` は `slots[selected]` でドラム席を含まないので、
-    /// 両者が同じ席を取り合うことがない（`AppState.drumPaneView`）
-    @ViewBuilder
-    private var drumColumn: some View {
-        VStack(spacing: CreoUITokens.spacingS) {
-            HStack(spacing: CreoUITokens.spacingS) {
-                Image(systemName: "circle.grid.2x2.fill")
-                    .foregroundColor(theme.brandSecondary)
-                Text(appState.rack.drumSlot.displayName ?? "LPD8（空き）")
-                    .font(LadylandFont.bodyBold)
-                    .foregroundColor(theme.textPrimary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                // **持ち替えの影響を受けない**ことを画面でも言う
-                Text("常駐")
-                    .font(LadylandFont.chip)
-                    .foregroundColor(theme.textTertiary)
-                Button {
-                    drumPaneExpanded = false
-                } label: {
-                    Image(systemName: "sidebar.right")
+    private var workspaceTabs: some View {
+        let selected = appState.windowPlacement.workspaceTab
+        return HStack(spacing: 2) {
+            ForEach(WorkspaceTab.allCases, id: \.self) { tab in
+                tabButton(tab.title, icon: tab.icon, selected: selected == tab) {
+                    appState.windowPlacement.workspaceTab = tab
                 }
-                .buttonStyle(.borderless)
-                .help("右列を畳む（横幅が足りない画面用）")
             }
-            .padding(.horizontal, CreoUITokens.spacingS)
-            .padding(.top, CreoUITokens.spacingS)
-
-            FocusPaneView(
-                slot: appState.rack.drumSlot,
-                hosted: appState.drumPaneView,
-                editorOnScreen: appState.editors.isOpenOnScreen(appState.rack.drumSlot.index),
-                thumbnail: appState.thumbnails.image(for: appState.rack.drumSlot),
-                onOpenWindow: { appState.openEditor(for: appState.rack.drumSlot) }
-            )
-            .frame(maxHeight: .infinity)
+            Spacer(minLength: 0)
+            if let pane = selected.paneID {
+                panePopOutButton(pane)
+            }
         }
-        // ⚠️ **サンプラーの画面はここにも埋まっている**（`FocusPaneView(hosted:)`）。
-        //
-        // **窓は 900pt の横長**（`requestViewController`）だが、この列はそこまで
-        // 広げられない — 広げるぶん Main の左列が痩せる。だから
-        // **View 側が幅で折り返す**（`LadySamplerView.padGrid`）:
-        // 窓では 4 列、ここでは 2 列。⚠️ **並びの順序は同じ**なので、
-        // どちらでも左上が pad 1 で、上の行が若い番号になる
-        .frame(width: 470)
-        .padding(.bottom, 22)  // footer 常駐分の逃げ（左列と揃える）
-        .background(theme.surfaceBgBase)
+        .padding(.horizontal, CreoUITokens.spacingM)
+        .padding(.vertical, CreoUITokens.spacingXs)
     }
 
-    /// Main 左列 — 既存の三段構え
+    @ViewBuilder
+    private func embeddedPane(_ pane: PaneID) -> some View {
+        if appState.panes.isOpen(pane) {
+            DetachedPaneStub(pane: pane)
+        } else {
+            SurfaceContent(pane: pane)
+        }
+    }
+
+    @ViewBuilder
+    private var workspaceContent: some View {
+        switch appState.windowPlacement.workspaceTab {
+        case .play:
+            FocusPaneView(
+                slot: appState.rack.selectedSlot,
+                hosted: appState.focusPaneView,
+                editorOnScreen: appState.editors.isOpenOnScreen(appState.rack.selected),
+                thumbnail: appState.thumbnails.image(for: appState.rack.selectedSlot),
+                onOpenWindow: { appState.openEditor(for: appState.rack.selectedSlot) }
+            )
+        case .mixer:
+            embeddedPane(.xtouch)
+        case .studio:
+            if appState.panes.isOpen(.jack) {
+                DetachedPaneStub(pane: .jack)
+            } else {
+                GeometryReader { geometry in
+                    if geometry.size.width < JackBoardView.wideThreshold {
+                        ScrollView(.horizontal) {
+                            JackBoardView().frame(width: JackBoardView.wideThreshold)
+                        }
+                    } else {
+                        JackBoardView()
+                    }
+                }
+            }
+        }
+    }
+
+    /// ノブ、ワークスペース、64 Track レーンを上から並べる。
     @ViewBuilder
     private var mainColumn: some View {
         // 三段構え（mako 裁定 2026-08-02）:
@@ -439,17 +410,13 @@ struct ContentView: View {
                     setCellColor: { appState.setCellColor($0, to: $1) }
                 )
 
-                // ── 中: プラグイン表示（残り全部の高さを取る） ────────
-                FocusPaneView(
-                    slot: appState.rack.selectedSlot,
-                    hosted: appState.focusPaneView,
-                    editorOnScreen: appState.editors.isOpenOnScreen(appState.rack.selected),
-                    thumbnail: appState.thumbnails.image(for: appState.rack.selectedSlot),
-                    onOpenWindow: { appState.openEditor(for: appState.rack.selectedSlot) }
-                )
-                .frame(maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    workspaceTabs
+                    Divider()
+                    workspaceContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
 
-                // ── 下: トラック横一列 + ドラム（LPD8）────────────────
                 trackLane
 
                 if let error = appState.startupError {
@@ -496,20 +463,6 @@ struct ContentView: View {
                     .buttonStyle(.borderless)
                     .help("Zenith 2 / L6max 以外に出力中 — クリックで設定を開く")
                 }
-
-                // **右列（LPD8）の開閉**。畳んだら戻す口がここにしか無いので、
-                // footer の常駐ボタンに置く（設定を開かずに戻せること）
-                Button {
-                    drumPaneExpanded.toggle()
-                } label: {
-                    Image(systemName: drumPaneExpanded
-                        ? "rectangle.righthalf.filled" : "rectangle.righthalf.inset.filled")
-                        .foregroundColor(
-                            drumPaneExpanded ? theme.brandSecondary : theme.textSecondary)
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("l", modifiers: [.command, .shift])
-                .help("LPD8 の楽器を右に並べる（⇧⌘L）")
 
                 // Editor Mode の toggle（D-7: 手動のみ — floating button + ⌘E）
                 Button {
@@ -585,126 +538,113 @@ struct ContentView: View {
     private static let focusPin: CGFloat = 0.5  // レーン可視幅に対する比率（中央）
 
     private var trackLane: some View {
-        HStack(alignment: .top, spacing: CreoUITokens.spacingM) {
-            GeometryReader { geometry in
-                let step = SlotView.width + CreoUITokens.spacingS
-                let visible = geometry.size.width
-                let total = step * CGFloat(InstrumentRack.trackCount) - CreoUITokens.spacingS
-                // focus タイルの左端が pin に来るような並びの offset
-                let wanted =
-                    visible * Self.focusPin - SlotView.width / 2
-                    - CGFloat(appState.rack.selected) * step
-                // 端で止める（総幅が可視幅に収まるなら滑らせない）
-                let offset = total <= visible ? 0 : min(0, max(visible - total, wanted))
+        GeometryReader { geometry in
+            let step = SlotView.width + CreoUITokens.spacingS
+            let visible = geometry.size.width
+            let total = step * CGFloat(InstrumentRack.trackCount) - CreoUITokens.spacingS
+            // focus タイルの左端が pin に来るような並びの offset
+            let wanted =
+                visible * Self.focusPin - SlotView.width / 2
+                - CGFloat(appState.rack.selected) * step
+            // 端で止める（総幅が可視幅に収まるなら滑らせない）
+            let offset = total <= visible ? 0 : min(0, max(visible - total, wanted))
 
-                HStack(spacing: CreoUITokens.spacingS) {
-                    ForEach(appState.rack.slots) { slot in
-                        // セル（動かない枠）とタイル（浮遊する中身）を分離 —
-                        // ガイドとヒットテストの基準はセル、offset はタイルだけ
-                        ZStack {
-                            tileCellGuide(for: slot.index)
-                            SlotView(
-                                slot: slot,
-                                isSelected: slot.index == appState.rack.selected,
-                                catalog: appState.rack.catalog,
-                                thumbnail: appState.thumbnails.image(for: slot),
-                                onSelect: { appState.select(slot.index) },
-                                onLoad: { appState.load($0, into: slot) },
-                                onActivateDraft: { appState.activateDraft($0, on: slot) },
-                                onOpenEditor: { appState.openEditor(for: slot) },
-                                onOpenAssign: {
-                                    appState.select(slot.index)
-                                    assignSidebarExpanded = true
-                                },
-                                onToggleMute: { appState.toggleMute(slot) },
-                                onDragChanged: { dragChanged(slot.index, $0) },
-                                onDragEnded: { dragEnded($0) },
-                                compact: true
-                            )
-                            .scaleEffect(drag?.sourceIndex == slot.index ? 1.04 : 1)
-                            .shadow(
-                                color: .black.opacity(drag?.sourceIndex == slot.index ? 0.3 : 0),
-                                radius: 8, y: 4)
-                            .animation(
-                                .spring(duration: 0.15),
-                                value: drag?.sourceIndex == slot.index)
-                            .offset(tileOffset(for: slot.index))
-                        }
-                        // シンセ入力の固定先バッジ（spec/09 Jack。鍵1 = Keystage、
-                        // 鍵2 = NCXse / MiniLab。両方同じ席なら並ぶ）
-                        .overlay(alignment: .topTrailing) {
-                            HStack(spacing: 2) {
-                                if appState.synthInput1Slot == slot.index {
-                                    CreoBadge("鍵1", variant: .brand, size: .s, shape: .square)
-                                        .help("鍵盤 1（Keystage）はこの席を弾く（右クリックで解除）")
-                                }
-                                if appState.miniLabSlot == slot.index {
-                                    CreoBadge("MiniLab", variant: .brand, size: .s, shape: .square)
-                                }
-                                if appState.secondKeyboardSlot == slot.index {
-                                    CreoBadge("鍵2", variant: .brand, size: .s, shape: .square)
-                                        .help("Numaはこの席を弾く（右クリックで解除）")
-                                }
-                            }
-                            .padding(4)
-                        }
-                        .contextMenu {
-                            // シンセ入力の固定（spec/09 Jack — 「Keystage は A Track、
-                            // MiniLab は B Track」。nil = 選択に追従）
+            HStack(spacing: CreoUITokens.spacingS) {
+                ForEach(appState.rack.slots) { slot in
+                    // セル（動かない枠）とタイル（浮遊する中身）を分離 —
+                    // ガイドとヒットテストの基準はセル、offset はタイルだけ
+                    ZStack {
+                        tileCellGuide(for: slot.index)
+                        SlotView(
+                            slot: slot,
+                            isSelected: slot.index == appState.rack.selected,
+                            catalog: appState.rack.catalog,
+                            thumbnail: appState.thumbnails.image(for: slot),
+                            onSelect: { appState.select(slot.index) },
+                            onLoad: { appState.load($0, into: slot) },
+                            onActivateDraft: { appState.activateDraft($0, on: slot) },
+                            onOpenEditor: { appState.openEditor(for: slot) },
+                            onOpenAssign: {
+                                appState.select(slot.index)
+                                assignSidebarExpanded = true
+                            },
+                            onToggleMute: { appState.toggleMute(slot) },
+                            onDragChanged: { dragChanged(slot.index, $0) },
+                            onDragEnded: { dragEnded($0) },
+                            compact: true
+                        )
+                        .scaleEffect(drag?.sourceIndex == slot.index ? 1.04 : 1)
+                        .shadow(
+                            color: .black.opacity(drag?.sourceIndex == slot.index ? 0.3 : 0),
+                            radius: 8, y: 4)
+                        .animation(
+                            .spring(duration: 0.15),
+                            value: drag?.sourceIndex == slot.index)
+                        .offset(tileOffset(for: slot.index))
+                    }
+                    // シンセ入力の固定先バッジ（spec/09 Jack。鍵1 = Keystage、
+                    // 鍵2 = NCXse / MiniLab。両方同じ席なら並ぶ）
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 2) {
                             if appState.synthInput1Slot == slot.index {
-                                Button("鍵盤 1（Keystage）の固定を解除（選択に追従）") {
-                                    appState.synthInput1Slot = nil
-                                }
-                            } else {
-                                Button("鍵盤 1（Keystage）をこの席に固定") {
-                                    appState.synthInput1Slot = slot.index
-                                }
-                            }
-                            if appState.secondKeyboardSlot == slot.index {
-                                Button("Numaの固定を解除（選択に追従）") {
-                                    appState.secondKeyboardSlot = nil
-                                }
-                            } else {
-                                Button("Numaをこの席に固定") {
-                                    appState.secondKeyboardSlot = slot.index
-                                }
+                                CreoBadge("鍵1", variant: .brand, size: .s, shape: .square)
+                                    .help("鍵盤 1（Keystage）はこの席を弾く（右クリックで解除）")
                             }
                             if appState.miniLabSlot == slot.index {
-                                Button("MiniLab の固定を解除（選択に追従）") { appState.miniLabSlot = nil }
-                            } else {
-                                Button("MiniLab をこの席に固定") { appState.miniLabSlot = slot.index }
+                                CreoBadge("MiniLab", variant: .brand, size: .s, shape: .square)
                             }
-                            // 席を空にする（今の姿は draft として棚に残る —
-                            // タイルメニューから着せ直せる）
-                            if slot.audioUnit != nil {
-                                Divider()
-                                Button("音源を外す（空にする）", role: .destructive) {
-                                    appState.unload(slot)
-                                }
+                            if appState.secondKeyboardSlot == slot.index {
+                                CreoBadge("鍵2", variant: .brand, size: .s, shape: .square)
+                                    .help("Numaはこの席を弾く（右クリックで解除）")
                             }
                         }
-                        .background(TileFrameReader(index: slot.index))
-                        .zIndex(tileZIndex(for: slot.index))
+                        .padding(4)
                     }
+                    .contextMenu {
+                        // シンセ入力の固定（spec/09 Jack — 「Keystage は A Track、
+                        // MiniLab は B Track」。nil = 選択に追従）
+                        if appState.synthInput1Slot == slot.index {
+                            Button("鍵盤 1（Keystage）の固定を解除（選択に追従）") {
+                                appState.synthInput1Slot = nil
+                            }
+                        } else {
+                            Button("鍵盤 1（Keystage）をこの席に固定") {
+                                appState.synthInput1Slot = slot.index
+                            }
+                        }
+                        if appState.secondKeyboardSlot == slot.index {
+                            Button("Numaの固定を解除（選択に追従）") {
+                                appState.secondKeyboardSlot = nil
+                            }
+                        } else {
+                            Button("Numaをこの席に固定") {
+                                appState.secondKeyboardSlot = slot.index
+                            }
+                        }
+                        if appState.miniLabSlot == slot.index {
+                            Button("MiniLab の固定を解除（選択に追従）") { appState.miniLabSlot = nil }
+                        } else {
+                            Button("MiniLab をこの席に固定") { appState.miniLabSlot = slot.index }
+                        }
+                        // 席を空にする（今の姿は draft として棚に残る —
+                        // タイルメニューから着せ直せる）
+                        if slot.audioUnit != nil {
+                            Divider()
+                            Button("音源を外す（空にする）", role: .destructive) {
+                                appState.unload(slot)
+                            }
+                        }
+                    }
+                    .background(TileFrameReader(index: slot.index))
+                    .zIndex(tileZIndex(for: slot.index))
                 }
-                .offset(x: offset)
-                .animation(.spring(duration: 0.25), value: appState.rack.selected)
-                .frame(width: visible, alignment: .leading)
-                .clipped()
             }
-            .frame(height: SlotView.compactHeight)
-
-            // ドラム（LPD8）は滑らない — 持ち替えから独立という性格を
-            // 位置でも表す（design/06 §3）
-            DrumSlotView(
-                slot: appState.rack.drumSlot,
-                catalog: appState.rack.catalog,
-                thumbnail: appState.thumbnails.image(for: appState.rack.drumSlot),
-                onLoad: { appState.load($0, into: appState.rack.drumSlot) },
-                onActivateDraft: { appState.activateDraft($0, on: appState.rack.drumSlot) },
-                onOpenEditor: { appState.openEditor(for: appState.rack.drumSlot) }
-            )
+            .offset(x: offset)
+            .animation(.spring(duration: 0.25), value: appState.rack.selected)
+            .frame(width: visible, alignment: .leading)
+            .clipped()
         }
+        .frame(height: SlotView.compactHeight)
         .coordinateSpace(name: "lane")
         .onPreferenceChange(TileFramesKey.self) { tileFrames = $0 }
     }
@@ -1279,68 +1219,5 @@ struct LevelBar: View {
         }
         .frame(width: 4, height: height)
         .animation(.linear(duration: 0.05), value: level)
-    }
-}
-
-/// ドラムスロットのタイル — LPD8 の打面。Keystage の持ち替えから独立（design/06 §3）
-struct DrumSlotView: View {
-    @Environment(\.creoTheme) private var theme
-    @ObservedObject var slot: InstrumentSlot
-    let catalog: [InstrumentComponent]
-    let thumbnail: NSImage?
-    let onLoad: (InstrumentComponent) -> Void
-    var onActivateDraft: (Draft) -> Void = { _ in }
-    let onOpenEditor: () -> Void
-
-    var body: some View {
-        // 楽器タイルと同じ骨格（ヘッダ / 名前 / 顔 + メーター）で高さを揃える
-        VStack(spacing: 4) {
-            HStack(spacing: 3) {
-                Image(systemName: "circle.grid.2x2")
-                    .font(LadylandFont.body)
-                    .foregroundColor(theme.brandSecondary)
-                Spacer(minLength: 0)
-                Text("LPD8")
-                    .font(LadylandFont.caption)
-                    .foregroundColor(theme.textTertiary)
-            }
-
-            CatalogMenu(
-                current: slot.displayName, drafts: slot.drafts, catalog: catalog,
-                onLoad: onLoad, onActivateDraft: onActivateDraft)
-
-            HStack(spacing: 4) {
-                PluginThumb(
-                    image: thumbnail, level: slot.level, isLoaded: slot.audioUnit != nil,
-                    seed: Double(slot.index) * 1.7, onOpen: onOpenEditor,
-                    size: SlotView.thumbSize)
-                LevelBar(level: slot.level, height: SlotView.thumbSize.height)
-
-                // ⚠️ **ここが本命の動線** — サンプラーはドラムスロットに載せて
-                // LPD8 のパッドで叩くもの（mako 要望 2026-08-05）。
-                // 割り当てるまで無音なので、タイルから直接開ける
-                if slot.displayName == LadySampler.displayName {
-                    Button(action: onOpenEditor) {
-                        Image(systemName: "waveform.badge.plus")
-                            .font(LadylandFont.caption)
-                            .foregroundColor(theme.brandPrimary)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("8 パッドに音を割り当てる")
-                }
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .frame(width: SlotView.width, height: SlotView.compactHeight)
-        .background(
-            RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
-                .fill(theme.brandSecondarySubtle)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CreoUITokens.radiusM)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
-                .foregroundColor(theme.brandSecondary.opacity(0.5))
-        )
     }
 }

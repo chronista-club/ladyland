@@ -1,13 +1,13 @@
 # 11. X-Touch Surface
 
 > **Status**: Draft
-> **Related**: `mem_1CfpRU9jTnXL4MeK2kfE42`, design 10
+> **Related**: `mem_1CfpRU9jTnXL4MeK2kfE42`, `mem_1ChUmyfDVi6vo4rWitdeiD`, design 10
 > **対象**: `ladyland/Sources/Ladyland/XTouch*`, `MIDI/MIDIInput.swift`, `Audio/InstrumentRack.swift`, `Audio/RackDatabase.swift`
 
 ## 構成
 
-右の Surface に X-Touch を追加する。8 Track + 独立した 1ch Master の計9本。
-Track は gain / Pan / Mute / Solo / Select、Master は全体音量。
+中央の Mixer に X-Touch の 8 Track と独立した 1ch Master を置く。
+Track は gain / Pan / Mute / Solo / Select と鍵盤入力元を扱い、Master は全体音量を扱う。
 FADER BANK 左右は表示開始を±8、CHANNEL 左右は±1ずらす。端で止まり、Masterは移動しない。
 選択と表示範囲は独立。Selectを押したときだけ演奏先の選択が変わる。
 
@@ -36,12 +36,24 @@ Transport / plugin割当は初版の対象外。
 
 ## Jack / VirtualDesk からの入口と割当一覧
 
-Jackの共通ヘッダに「X-Touch → Mixer Surface」を置く。サイドバー・2.5D・3Dで同じ入口を使い、
-既存のX-Touch Paneを開く。開いていれば前面へ戻す。独立したRackやMIDI接続を作らない。
+Jack の共通ヘッダにある「X-Touch → Mixer Surface」は主ウィンドウの Mixer を選ぶ。
+中央 Mixer と保存済みの Mixer／X-Touch 別ウィンドウは、同じラックと `XTouchSurfaceView` を使う。
 Mixer Surfaceは既存の8ch + Master操作と「割当一覧」を持ち、実装済みの操作と未割当を分ける。
 一覧は `XTouchAssignments` に集約し、実際にdecodeするボタンの網羅をテストする。
 未接続でも一覧を参照できる。Recは役割をこのSurfaceで詰めるまで未割当とし、録音できる表示にしない。
 3D機材のドラッグや既存のnanoKONTROL2用Mixer部品の結線は変更しない。
+
+## ワークスペースと Inspector
+
+上部のノブと下部の 64 Track レーンの間で Play／Mixer／Studio を切り替える。
+Mixer と Studio は切り離せる。中央の Studio は 720pt の机表示を確保し、幅が足りないときは横にスクロールする。
+右の Inspector は Track と Gear で、Gear は ROTO／Keystage／LPD8 に切り替えられる。
+
+`window.json` の `workspaceTab` は省略可能で、未保存時は Play を開く。旧 `assignTab` の Mixer／X-Touch／Jack は Inspector 上では Track を表示する。
+`drumPaneExpanded` と既存の `SurfaceTab`／`PaneID` は互換のため保持する。メイン画面の固定 Drum 列とタイルは外し、既存のドラム音声経路とラックデータを引き継ぐ。
+
+鍵盤の固定先は既存の `AppState` のルーティングに書く。未固定の鍵盤は選択 Track に追従し、該当チャンネルで `↗` を表示する。
+nanoKONTROL2 の S → ノブ → S と同じ候補・確定操作を Mixer 上部から確認・操作できる。
 
 ## Status log
 
@@ -50,3 +62,4 @@ Mixer Surfaceは既存の8ch + Master操作と「割当一覧」を持ち、実�
 - 2026-10-08: 807 tests passed（終了時の明示的なSDK closeを含む）。専用の音声/MIDI/保存なしのネイティブ確認窓で9ストリップ、BANK/CHANNEL、Select/Mute/Soloを観測。実機motor/LCD/音声は別確認。
 - 2026-10-08: ユーザーが再接続時LCD演出とFADER BANK / CHANNELの実機動作を確認。
 - 2026-10-09: Jack / VirtualDesk の「X-Touch → Mixer Surface」を機能整理の中心とするGO。割当一覧を操作面へ集約する。Recの役割は未決定。
+- 2026-11-28: Play／Mixer／Studio の中央タブと Track／Gear Inspector を導入。鍵盤入力元の表示・固定を Mixer に集約。

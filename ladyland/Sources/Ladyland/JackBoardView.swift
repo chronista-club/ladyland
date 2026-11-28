@@ -100,7 +100,7 @@ struct JackBoardView: View {
         VStack(spacing: 0) {
             HStack {
                 Button {
-                    appState.panes.open(.xtouch, appState: appState)
+                    appState.windowPlacement.showWorkspace(.mixer)
                 } label: {
                     Label("X-Touch → Mixer Surface", systemImage: "slider.horizontal.3")
                 }
@@ -113,9 +113,8 @@ struct JackBoardView: View {
         GeometryReader { geometry in
             switch Self.layout(forWidth: geometry.size.width) {
             case .wide:
-                VStack(spacing: 0) {
-                    (desk3D ? AnyView(Desk3DView()) : AnyView(DeskView()))
-                    if desk3D { StudioTrackPanel() }
+                Group {
+                    if desk3D { Desk3DView() } else { DeskView() }
                 }
                     .overlay(alignment: .topTrailing) {
                         Picker("", selection: $desk3D) {
