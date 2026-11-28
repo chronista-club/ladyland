@@ -45,6 +45,15 @@ struct StudioInputChoiceTests {
         choice.cancel()
         #expect(choice.pending == nil)
     }
+    @Test("画面の入力元ピッカーは同じ Track の候補だけを変更する")
+    func chooseInputOnScreen() {
+        var choice = StudioTrackSelection()
+        _ = choice.press(slot: 10, current: .numa)
+        choice.choose(.keystage, for: 9)
+        #expect(choice.pending?.keyboard == .numa)
+        choice.choose(.miniLab, for: 10)
+        #expect(choice.press(slot: 10, current: .numa) == .init(slot: 10, keyboard: .miniLab))
+    }
     @Test("バンクは 8 Track ずつ移動し、両端では現在の Track を保つ")
     func bankEdges() {
         #expect(StudioTrackSelection.bankTarget(selected: 3, trackCount: 64, direction: 1) == 8)

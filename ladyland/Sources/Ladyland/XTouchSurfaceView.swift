@@ -7,63 +7,75 @@ struct XTouchSurfaceView: View {
     @ObservedObject var rack: InstrumentRack
     @State private var showingAssignments = false
 
+    private let channelRoutingHeight: CGFloat = 42
+
     var body: some View {
         ScrollView(.vertical) {
-        VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
-            HStack {
-                Text("X-Touch / Mixer Surface").font(LadylandFont.deskHeading)
-                Spacer(minLength: CreoUITokens.spacingS)
-                Button(showingAssignments ? "操作面に戻る" : "割当一覧") {
-                    showingAssignments.toggle()
-                }.controlSize(.small)
+            VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
+                HStack {
+                    Text("X-Touch / Mixer Surface").font(LadylandFont.deskHeading)
+                    Spacer(minLength: CreoUITokens.spacingS)
+                    Button(showingAssignments ? "操作面に戻る" : "割当一覧") {
+                        showingAssignments.toggle()
+                    }.controlSize(.small)
+                }
+                HStack {
+                    Circle().fill(controller.connected ? theme.semanticSuccessText : theme.textTertiary)
+                        .frame(width: 7, height: 7)
+                    Text(controller.greeting ? "X-Touch · 接続中…" : controller.connected ? "X-Touch · 接続済み" : "X-Touch · 未接続 / 使用OFF")
+                    Spacer()
+                    Text("8ch + Master").foregroundStyle(theme.textSecondary)
+                }.font(LadylandFont.deskCaption)
+
+                if showingAssignments {
+                    assignments
+                } else {
+                    navigation
+                    StudioRoutingControls()
+                    if let error = controller.error {
+                        Text(error).font(LadylandFont.deskCaption).foregroundStyle(theme.semanticError)
+                    }
+                    mixerStrips
+                    if controller.bank.pending != 0 {
+                        Text("フェーダーから手を離すと担当Trackが切り替わります")
+                            .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
+                    }
+                    Text("本体: MC / USB · ノブ: Pan · ノブ押下: 中央へ")
+                        .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
+                }
             }
-            HStack {
-                Circle().fill(controller.connected ? theme.semanticSuccessText : theme.textTertiary)
-                    .frame(width: 7, height: 7)
-                Text(controller.greeting ? "X-Touch · 接続中…" : controller.connected ? "X-Touch · 接続済み" : "X-Touch · 未接続 / 使用OFF")
-                Spacer()
-                Text("8ch + Master").foregroundStyle(theme.textSecondary)
-            }.font(LadylandFont.deskCaption)
-            if showingAssignments {
-                assignments
-            } else {
-            navigation
-            if let error = controller.error {
-                Text(error).font(LadylandFont.deskCaption).foregroundStyle(theme.semanticError)
-            }
-            HStack(alignment: .top, spacing: CreoUITokens.spacingS) {
-                GeometryReader { geometry in
+            .padding(CreoUITokens.spacingM)
+        }
+    }
+
+    private var mixerStrips: some View {
+        HStack(alignment: .top, spacing: CreoUITokens.spacingS) {
+            GeometryReader { geometry in
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 6) {
                         ForEach(controller.bank.indices(trackCount: rack.slots.count), id: \.self) { index in
-                            XTouchChannelStrip(slot: rack.slots[index], selected: rack.selected == index,
+                            XTouchChannelStrip(
+                                slot: rack.slots[index], selected: rack.selected == index,
                                 onSelect: { controller.select(index) },
-                                onChange: controller.onChange, width: max(70, (geometry.size.width - 42) / 8))
+                                onChange: controller.onChange,
+                                width: max(80, (geometry.size.width - 42) / 8),
+                                routingHeight: channelRoutingHeight)
                         }
                     }.padding(.bottom, 4)
                 }
-                }.frame(height: 384)
-                Divider()
-                VStack(spacing: 10) {
-                    Text("MASTER").font(LadylandFont.deskHeading)
-                    Text("全体").font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
-                    Spacer().frame(height: 35)
-                    XTouchFader(value: Binding(get: { rack.masterGain }, set: { controller.setMaster($0) }), label: "Master 音量")
-                    Text(String(format: "%.0f%%", rack.masterGain * 100)).monospacedDigit()
-                }.font(LadylandFont.deskCaption).frame(width: 64)
-                    .padding(.vertical, CreoUITokens.spacingS)
-            }
-            if controller.bank.pending != 0 {
-                Text("フェーダーから手を離すと担当Trackが切り替わります")
-                    .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
-            }
-            Text("本体: MC / USB · ノブ: Pan · ノブ押下: 中央へ")
-                .font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
-            }
-            Spacer(minLength: 0)
-        }.padding(CreoUITokens.spacingM)
+            }.frame(height: 384 + channelRoutingHeight)
+            Divider()
+            VStack(spacing: 10) {
+                Text("MASTER").font(LadylandFont.deskHeading)
+                Text("全体").font(LadylandFont.deskCaption).foregroundStyle(theme.textSecondary)
+                Spacer().frame(height: 35 + channelRoutingHeight)
+                XTouchFader(value: Binding(get: { rack.masterGain }, set: { controller.setMaster($0) }), label: "Master 音量")
+                Text(String(format: "%.0f%%", rack.masterGain * 100)).monospacedDigit()
+            }.font(LadylandFont.deskCaption).frame(width: 64)
+                .padding(.vertical, CreoUITokens.spacingS)
         }
     }
+
     private var assignments: some View {
         VStack(alignment: .leading, spacing: CreoUITokens.spacingM) {
             Text("左8列の担当はBANK / CHANNELで移動します。SELECTを押すまで選択Trackは変わりません。")
@@ -108,17 +120,22 @@ struct XTouchSurfaceView: View {
 }
 
 private struct XTouchChannelStrip: View {
+    @EnvironmentObject private var appState: AppState
     @Environment(\.creoTheme) private var theme
     @ObservedObject var slot: InstrumentSlot
     let selected: Bool
     let onSelect: () -> Void
     let onChange: () -> Void
-    var width: CGFloat = 70
+    let width: CGFloat
+    let routingHeight: CGFloat
+
     var body: some View {
         VStack(spacing: CreoUITokens.spacingS) {
             Rectangle().fill(slot.rotoColor.map(RotoPaletteMap.color) ?? theme.brandPrimary).frame(height: 3)
             Text("T\(slot.index + 1)").font(LadylandFont.deskHeading)
             Text(slot.trackName ?? "空き").lineLimit(1).help(slot.trackName ?? "空き")
+            keyboardInputMenu
+                .frame(height: routingHeight)
             Slider(value: Binding(get: { slot.pan }, set: { slot.pan = $0; onChange() }), in: -1...1)
                 .accessibilityLabel("T\(slot.index + 1) Pan")
             Text(abs(slot.pan) < 0.01 ? "C" : String(format: "%@ %.0f", slot.pan < 0 ? "L" : "R", abs(slot.pan) * 100))
@@ -136,6 +153,42 @@ private struct XTouchChannelStrip: View {
         .frame(width: width)
         .background(selected ? theme.surfaceBgEmphasis : theme.surfaceSurface)
     }
+
+    private var keyboardInputMenu: some View {
+        let sources = appState.studioInputs(for: slot.index).map { keyboard in
+            keyboard.title + (appState.studioKeyboardSlot(keyboard) == nil ? " ↗" : "")
+        }
+        return Menu {
+            ForEach(StudioKeyboard.allCases) { keyboard in
+                if appState.studioKeyboardSlot(keyboard) == slot.index {
+                    Button("\(keyboard.title) を選択 Track に追従") {
+                        appState.setStudioKeyboard(keyboard, slot: nil)
+                    }
+                } else {
+                    Button("\(keyboard.title) をこの Track に固定") {
+                        appState.setStudioKeyboard(keyboard, slot: slot.index)
+                    }
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                if sources.isEmpty {
+                    Text("入力元").foregroundStyle(theme.textSecondary)
+                }
+                ForEach(sources, id: \.self) { source in
+                    Text(source)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.mini)
+        .help("鍵盤入力元を設定。↗ は選択 Track に追従")
+        .accessibilityLabel("T\(slot.index + 1) 鍵盤入力元")
+        .accessibilityValue(sources.isEmpty ? "なし" : sources.joined(separator: "、"))
+    }
+
     private func action(_ title: String, active: Bool, _ callback: @escaping () -> Void) -> some View {
         Button(action: callback) {
             Text(title).frame(maxWidth: .infinity).padding(.vertical, 4)

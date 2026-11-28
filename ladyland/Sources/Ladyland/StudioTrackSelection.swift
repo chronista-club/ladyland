@@ -25,8 +25,12 @@ struct StudioTrackSelection: Equatable {
         return nil
     }
     mutating func turn(slot: Int, value: UInt8) {
+        choose(StudioKeyboard.allCases[min(2, Int(value) * 3 / 128)], for: slot)
+    }
+
+    mutating func choose(_ keyboard: StudioKeyboard, for slot: Int) {
         guard pending?.slot == slot else { return }
-        pending?.keyboard = StudioKeyboard.allCases[min(2, Int(value) * 3 / 128)]
+        pending?.keyboard = keyboard
     }
     mutating func cancel() { pending = nil }
 

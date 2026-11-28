@@ -21,7 +21,35 @@ enum WindowMode: String, Codable, CaseIterable {
     case windowed
 }
 
-/// **サイドバーが見せている面**（mako 裁定 2026-08-06 → `Surface` の doc）。
+enum WorkspaceTab: String, Codable, CaseIterable {
+    case play, mixer, studio
+
+    var title: String {
+        switch self {
+        case .play: "Play"
+        case .mixer: "Mixer"
+        case .studio: "Studio"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .play: "pianokeys.inverse"
+        case .mixer: "slider.horizontal.3"
+        case .studio: "cable.connector"
+        }
+    }
+
+    var paneID: PaneID? {
+        switch self {
+        case .play: nil
+        case .mixer: .xtouch
+        case .studio: .jack
+        }
+    }
+}
+
+/// window.json と Pane が参照する面（mako 裁定 2026-08-06 → `Surface` の doc）。
 ///
 /// ⚠️ **raw 値は `window.json` に保存される**。変えると保存済みの設定が
 /// 読めなくなり、画面配置ごと既定へ落ちる（`WindowStore.load` は decode 失敗で
@@ -31,10 +59,14 @@ enum WindowMode: String, Codable, CaseIterable {
 /// デバイスの設定）。**それは面という枠組みでは自然なこと**なので、
 /// 見出しで性格を出し分ける必要は無い — タブが機材名を出している
 enum SurfaceTab: String, Codable, CaseIterable {
-    // 並び = タブの表示順（mako 裁定 2026-08-14「Track, ROTO, Keystage,
-    // LPD8 の順」— 席そのものが先頭、機材があと。Jack（結線図）は末尾）
-    // Mixer（8ch。mako 火花 2026-10-01）は席の一覧なので Track の隣
     case track, mixer, xtouch, roto, keystage, lpd8, jack
+
+    static let gearTabs: [Self] = [.roto, .keystage, .lpd8]
+
+    /// 旧設定で中央に移った面が選ばれていた場合も Inspector は開ける。
+    var inspectorTab: Self {
+        Self.gearTabs.contains(self) ? self : .track
+    }
 
     /// タブに出す機材名（Track だけ機材ではなく**選択中の席そのもの**）
     var title: String {
@@ -91,9 +123,11 @@ struct WindowPreferences: Codable, Equatable {
     var assignSidebarExpanded: Bool?
     /// R Area のタブ（nil = Keystage）
     var assignTab: SurfaceTab?
+    /// 中央ワークスペースのタブ（nil = Play）
+    var workspaceTab: WorkspaceTab?
     /// R Area 下部のログペインが開いているか（nil = 閉じている）
     var debugLogExpanded: Bool?
-    /// Main を縦分割して LPD8 の楽器を並べるか（mako 要望 2026-08-06）
+    /// 旧 window.json の Main 右列設定。
     var drumPaneExpanded: Bool?
 
     /// R Area の幅（mako 要望 2026-08-06「R sidebar と Main の表示領域を
@@ -326,6 +360,16 @@ final class WindowPlacementController: ObservableObject {
         }
     }
 
+    var workspaceTab: WorkspaceTab {
+        get { prefs.workspaceTab ?? .play }
+        set {
+            guard newValue != prefs.workspaceTab else { return }
+            objectWillChange.send()
+            prefs.workspaceTab = newValue
+            scheduleSave()
+        }
+    }
+
     /// R Area 下部のログペイン（同上）。**既定は閉じ** — 常設だが、
     /// 開いていると割り当てパネルが狭くなるので開くかは都度の判断
     var debugLogExpanded: Bool {
@@ -380,6 +424,7 @@ final class WindowPlacementController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var saveTask: Task<Void, Never>?
     private var prefs: WindowPreferences
+    private let storeURL: URL
 
     /// 直近に書いた内容（変化が無ければ書かない — rack 側の dedup と同じ作法）
     private var lastSaved: WindowPreferences?
@@ -390,8 +435,9 @@ final class WindowPlacementController: ObservableObject {
     /// ウィンドウのタイトル（WindowGroup("ladyland") と対）
     private let windowTitle = "ladyland"
 
-    init() {
-        prefs = WindowStore.load() ?? .default
+    init(storeURL: URL = WindowStore.url) {
+        self.storeURL = storeURL
+        prefs = WindowStore.load(from: storeURL) ?? .default
         lastSaved = prefs  // 読んだ直後は書く必要がない
         mode = prefs.mode
     }
@@ -432,6 +478,11 @@ final class WindowPlacementController: ObservableObject {
 
     private var mainWindow: NSWindow? {
         NSApp.windows.first { $0.title == windowTitle && $0.isVisible }
+    }
+
+    func showWorkspace(_ tab: WorkspaceTab) {
+        workspaceTab = tab
+        mainWindow?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - 起動時の適用
@@ -553,7 +604,7 @@ final class WindowPlacementController: ObservableObject {
         lastSaveAttempt = Date()
         guard prefs != lastSaved else { return }
         do {
-            try WindowStore.save(prefs)
+            try WindowStore.save(prefs, to: storeURL)
             lastSaved = prefs
         } catch {
             NSLog("window prefs save failed: %@", String(describing: error))

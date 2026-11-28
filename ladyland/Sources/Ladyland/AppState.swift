@@ -311,14 +311,6 @@ final class AppState: ObservableObject {
     /// focus pane が担当中のスロット index（選択変更時に前の借用を返す）
     private var focusPaneIndex: Int?
 
-    /// **Main 右列に並べる LPD8（ドラム席）の画面**（mako 要望 2026-08-06
-    /// 「右に LPD8 のビュー（まずはサンプラ）のプラグインを並列で表示したい」）。
-    ///
-    /// ⚠️ focus pane と**同時に借りられる**。custody（`lentToFocus`）は
-    /// index ごとの集合で、`selectedSlot` は `slots[selected]` = **ドラム席を
-    /// 含まない**ので、両者が同じ席を取り合うことがない
-    @Published private(set) var drumPaneView: NSView?
-
     /// 選択スクラブ（VALUE エンコーダー連打）中に VC 取得を蹴りまくらない
     /// ためのデバウンス
     private var focusPaneTask: Task<Void, Never>?
@@ -1351,6 +1343,14 @@ final class AppState: ObservableObject {
         StudioKeyboard.allCases.filter { (studioKeyboardSlot($0) ?? rack.selected) == index }
     }
 
+    func setStudioKeyboard(_ keyboard: StudioKeyboard, slot: Int?) {
+        switch keyboard {
+        case .numa: secondKeyboardSlot = slot
+        case .keystage: synthInput1Slot = slot
+        case .miniLab: miniLabSlot = slot
+        }
+    }
+
     func pressStudioSelect(_ index: Int) {
         guard rack.slots.indices.contains(index) else { return }
         // Read the current source before selecting: unbound keyboards follow selection.
@@ -1358,11 +1358,7 @@ final class AppState: ObservableObject {
         let commit = studioSelection.press(slot: index, current: current)
         select(index)
         if let commit {
-            switch commit.keyboard {
-            case .numa: secondKeyboardSlot = commit.slot
-            case .keystage: synthInput1Slot = commit.slot
-            case .miniLab: miniLabSlot = commit.slot
-            }
+            setStudioKeyboard(commit.keyboard, slot: commit.slot)
         }
     }
 
@@ -1590,19 +1586,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// ドラム席の画面を借りる（Main 右列用）。
-    /// 借りられない（VC 未取得 / ウィンドウで編集中）ときは nil のまま —
-    /// `borrowFocusPaneView` が駐機取得を蹴るので、届いたら次の呼びで入る
-    func refreshDrumPane() {
-        let slot = rack.drumSlot
-        guard slot.audioUnit != nil else {
-            drumPaneView = nil
-            return
-        }
-        let view = editors.borrowFocusPaneView(for: slot)
-        if view !== drumPaneView { drumPaneView = view }
-    }
-
     private func applyFocusPane() {
         let slot = rack.selectedSlot
         if let old = focusPaneIndex, old != slot.index {
@@ -1618,8 +1601,6 @@ final class AppState: ObservableObject {
         if view !== focusPaneView {
             focusPaneView = view
         }
-        // 右列（LPD8）も同じ拍で追う — 別の席なので取り合わない
-        refreshDrumPane()
     }
 
     // MARK: - lldata スナップショット（持ち出す姿。mako 要望 2026-08-02）
