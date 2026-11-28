@@ -24,7 +24,7 @@ Ladyland メニューから新しい公開版を確認し、利用者が選ん�
   ダウンロード・適用・終了時インストールを許可しない。
 - Sparkle による再起動も通常のアプリ終了を通る。既存の `applicationShouldTerminate` による
   MIDI セッションの終了待ちと、`willTerminateNotification` での同期保存を維持する。
-  同梱 `fieldd` の扱いは既存の起動処理に従う。外部の `midistaged` を更新する機能は持たない。
+  同梱 `fieldd` の扱いは既存の起動処理に従う。外部の `lnx-server`（旧 `midistaged`）を更新する機能は持たない。
 
 ## 配布
 

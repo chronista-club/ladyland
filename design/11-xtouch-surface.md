@@ -13,13 +13,13 @@ FADER BANK 左右は表示開始を±8、CHANNEL 左右は±1ずらす。端で�
 
 ## 接続
 
-物理接続は Midistage に限定する。Ladyland は自分の lease に属する X-Touch INT bridge のみ読む。
+物理接続は `lnx-server`（旧 Midistage）に限定する。Ladyland は自分の lease に属する X-Touch INT bridge のみ読む。
 EXT は外部 MIDI の通過口なので操作面として扱わない。
 送信は SDK SendMIDI を直列に送り、失効時は送信処理を停止して完了を待つ。
 UI変更も実機変更も同じ rack に反映する。LCD・色・値・LED・motorは差分だけ投影する。
 タッチ中はmotor出力しない。Bank/Channel変更もタッチ中は保留し、旧Trackへの操作を混ぜない。
 
-MCU byte変換は純粋層でテストする。既存Midistage Rust profileを参照し、Swift consumer側で変換する（現在のSDKはraw MIDI契約）。
+MCU byte変換は純粋層でテストする。`lnx-gear`（旧 Midistage）の Rust profileを参照し、Swift consumer側で変換する（現在のSDKはraw MIDI契約）。
 参照: [Ardour MCU](https://github.com/Ardour/ardour/tree/master/libs/surfaces/mackie)。V-Potはbit6が方向、下6bitが移動量。
 
 ## 音声と保存

@@ -56,5 +56,5 @@ LCDの色はTrack面の名前横の色チップで設定する。起動演出の
 モーターから返る値は音量へ戻さず、物理操作はタッチ中だけ受ける。
 
 Pan / Solo / Masterも他のラック設定と同じSQLiteへ保存する。未接続時も画面で編集できる。
-通信はMidistage経由。X-Touch EXTを鍵盤として扱わない。
+通信は `lnx-server`（旧 Midistage）経由。X-Touch EXTを鍵盤として扱わない。
 Transport・プラグインパラメーター割り当ては初版の対象外。
