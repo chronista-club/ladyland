@@ -44,6 +44,12 @@ final class RotoService {
 
     /// ROTO からの値変更 = AU パラメータ変更（常時保存のトリガー用）
     var onParamChanged: (() -> Void)?
+    var onStoryKnob: ((Int, Int, Float) -> Bool)?
+    var storyKnobValues: [Double] = [] {
+        didSet {
+            if oldValue != storyKnobValues { pushMotors(force: oldValue.isEmpty != storyKnobValues.isEmpty) }
+        }
+    }
 
     /// MIXER 冊のボタン = Track の直接選択（mako 裁定 2026-08-13）。
     /// 選択の波及（ルーティング / LED / 差分焼き / 保存）は AppState.select に
@@ -1214,6 +1220,7 @@ final class RotoService {
             logKnobMiss("rack が繋がっていない")
             return
         }
+        if onStoryKnob?(rack.selected, ctrl, Float(normalized)) == true { return }
         guard let mapping = rack.selectedSlot.knobMappings.first(where: { $0.knob == ctrl })
         else {
             logKnobMiss(
@@ -1642,6 +1649,13 @@ final class RotoService {
             shadow.motorChanged(ctrl, value, force: force)
         }
 
+        func motorValue(_ ctrl: Int) -> Double? {
+            if let position = KnobPages.index(forCC: ctrl), storyKnobValues.indices.contains(position) {
+                return storyKnobValues[position]
+            }
+            return normalizedValue(ctrl, in: slot)
+        }
+
         if Self.dawType == 3 {
             // Logic 方言: ch15 に**絶対セル番号**で送る — 全ページぶんを
             // 一度に置ける（表示していないページも先に正しい位置にしておける）
@@ -1650,7 +1664,7 @@ final class RotoService {
             // （protocol.md「値が届くとデバイスが端 stop を張る」）
             for cell in 0..<RotoParam.smartCells {
                 guard let ctrl = RotoPageLayout.smartCell(page: smartPage, deviceCell: cell),
-                    let value = normalizedValue(ctrl, in: slot)
+                    let value = motorValue(ctrl)
                 else {
                     // 割当なし → 0 位置へ寝かせる（force のときだけ）。
                     // ⚠️ 席が無いので Ctrl 番号が無い — **負のキー**で帳簿を
@@ -1685,7 +1699,7 @@ final class RotoService {
             // 割当が無いセルには送らない — learn で起きた knob しか動かない
             for knob in 0..<RotoParam.physicalKnobs {
                 let ctrl = RotoPageLayout.pluginCell(page: pluginPage, knob: knob)
-                guard let value = normalizedValue(ctrl, in: slot), changed(ctrl, value) else { continue }
+                guard let value = motorValue(ctrl), changed(ctrl, value) else { continue }
                 pairs.append(contentsOf: Roto.motor(knob: knob, value: value))
             }
         }

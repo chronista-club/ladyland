@@ -24,6 +24,7 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0")
     ],
     targets: [
+        .target(name: "StoryKit", swiftSettings: [.swiftLanguageMode(.v5)]),
         // LPD8 mk2 SysEx の純粋層 + CoreMIDI 送信（design/06 §8）。
         // 本体 Ladyland と RigBench の両方から使う共有ライブラリ
         .target(
@@ -55,6 +56,7 @@ let package = Package(
         .executableTarget(
             name: "Ladyland",
             dependencies: [
+                "StoryKit",
                 "Lpd8Kit",
                 "RotoKit",
                 "KeystageKit",
@@ -75,7 +77,7 @@ let package = Package(
         // cortex の rigcheck の Swift 側相棒 — swift run RigBench で一覧
         .executableTarget(
             name: "RigBench",
-            dependencies: ["Lpd8Kit", "RotoKit", "KeystageKit"],
+            dependencies: ["StoryKit", "Lpd8Kit", "RotoKit", "KeystageKit"],
             path: "Sources/RigBench",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
@@ -83,7 +85,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LadylandTests",
-            dependencies: ["Ladyland", "Lpd8Kit", "KeystageKit", "RigBench"],
+            dependencies: ["Ladyland", "StoryKit", "Lpd8Kit", "KeystageKit", "RigBench"],
             path: "Tests/LadylandTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)

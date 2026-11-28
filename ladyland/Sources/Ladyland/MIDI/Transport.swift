@@ -19,6 +19,7 @@ enum Transport {
     ]
 
     /// X-Touch（Mackie Control）のトランスポート Note
+    static let mackieNotes: ClosedRange<UInt8> = 0x5B...0x5F
     private static let mackie: [UInt8: TransportAction] = [
         0x5B: .rewind, 0x5C: .fastForward, 0x5D: .stop, 0x5E: .play, 0x5F: .record,
     ]

@@ -182,6 +182,19 @@ final class MidiClockTracker: @unchecked Sendable {
 final class MIDIRouter: @unchecked Sendable {
     private let lock = NSLock()
     private var keyboardTarget: AVAudioUnitMIDIInstrument?
+    private var keyboardTrack: Int?
+    private var noteObserver: (@Sendable (Int, UInt8, UInt8, UInt8, String, Double) -> Void)?
+
+    func observeNotes(_ observer: (@Sendable (Int, UInt8, UInt8, UInt8, String, Double) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        noteObserver = observer
+    }
+
+    // Called under the router lock so the observation uses the same route as input.
+    private func observeNote(track: Int?, status: UInt8, note: UInt8, velocity: UInt8, deviceID: String) {
+        guard let track, let noteObserver, status & 0xf0 == 0x90 || status & 0xf0 == 0x80 else { return }
+        noteObserver(track, status, note, velocity, deviceID, ProcessInfo.processInfo.systemUptime)
+    }
     private var drumsTarget: AVAudioUnitMIDIInstrument?
 
     private struct VoiceState {
@@ -386,8 +399,9 @@ final class MIDIRouter: @unchecked Sendable {
     /// 判断の瞬間に値型 MidiRoute を発行する。整形・名前解決は main 側の仕事
     private var traceHandler: (@Sendable (MidiRoute) -> Void)?
 
-    func setKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?) {
+    func setKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?, track: Int? = nil) {
         lock.lock()
+        keyboardTrack = track
         // **送り先が変わっていないなら帳簿に触らない** — updateRouting は
         // 割当編集・同じタイルの再選択・LPD8 のプログラム読み込みなど
         // 15 箇所から呼ばれる。以前はここで無条件に reset していたため、
@@ -419,6 +433,7 @@ final class MIDIRouter: @unchecked Sendable {
     /// 鍵盤 2 の送り先（① は選択スロットと同じ。② で独立した席の選択を足す）
     enum AuxiliaryKeyboard: Hashable, Sendable { case numa, miniLab }
     private struct AuxiliaryState {
+        var track: Int?
         var target: AVAudioUnitMIDIInstrument?
         var held: Set<UInt16> = []
         var ccs: Set<UInt8> = []
@@ -471,8 +486,10 @@ final class MIDIRouter: @unchecked Sendable {
         auxiliary[input, default: AuxiliaryState()].handler = handler
     }
 
-    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?, input: AuxiliaryKeyboard = .numa) {
+    func setSecondKeyboardTarget(_ unit: AVAudioUnitMIDIInstrument?, input: AuxiliaryKeyboard = .numa,
+                                 track: Int? = nil) {
         lock.lock()
+        auxiliary[input, default: AuxiliaryState()].track = track
         guard unit !== auxiliary[input]?.target else {
             lock.unlock()
             return
@@ -500,6 +517,7 @@ final class MIDIRouter: @unchecked Sendable {
         let captured = status & 0xF0 == 0xB0 && state.ccs.contains(data1)
         let forwards = Self.secondKeyboardForwards(status: status, data1: data1)
         if forwards, !captured {
+            observeNote(track: state.track, status: status, note: data1, velocity: data2, deviceID: deviceID)
             let key = UInt16(status & 0x0F) << 8 | UInt16(data1)
             switch status & 0xF0 {
             case 0x90 where data2 > 0: auxiliary[input, default: AuxiliaryState()].held.insert(key)
@@ -755,6 +773,8 @@ final class MIDIRouter: @unchecked Sendable {
             sendDevice(deviceID, target: target, status: status, data1: data1, data2: data2)
             return
         }
+
+        observeNote(track: keyboardTrack, status: status, note: data1, velocity: data2, deviceID: deviceID)
 
         // ノートの押下記録（キープの帳簿）
         if status & 0xF0 == 0x90, data2 > 0 {

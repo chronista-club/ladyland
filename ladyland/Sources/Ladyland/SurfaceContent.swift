@@ -51,6 +51,8 @@ struct SurfaceContent: View {
                 .fixedSize(horizontal: false, vertical: true)
                 RotoSettingsView()
             }
+        case .story:
+            StoryPatternView(controller: appState.storyController)
         case .jack:
             // Jack 結線図（spec/09 — 機材 → Jack → Track の見取り図。
             // 演奏前チェック: いま誰がどこ？が一目）

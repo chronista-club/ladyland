@@ -3,6 +3,8 @@
 **起票**: mem_1CfrGtjgGHpVdfbyes2P2e
 **ステータス**: Draft（2026-10-09 起工、wip/host-transport）
 
+Story の追加後の動作は [design/14](14-pattern-story.md) を参照。
+
 ## 1. なぜ今まで無かったか
 
 design/06 §2 の確定要件は「完全即興。曲・セクションの概念なし。ファイル再生なし」。
@@ -113,3 +115,5 @@ PLAY からの経過（ナノ秒）。小節.拍も経過時間も、AU の `bea
 - 2026-10-09 実装: `Transport`（読み替え）/ `HostTempo` の拍・transport 口 / `InstrumentRack` の `running` / `AppState.transport(_:)`。純テスト 15 本 GREEN。nanoKONTROL2 の PLAY / STOP / REC は**実機確認待ち**（X-Touch の受信口は wip/xtouch-surface 側）
 - 2026-10-10 << >> = 小節単位で頭を置き直す（mako「それでいこう」）。`HostTempo.shiftDownbeat(bars:)`
 - 2026-10-10 時間軸（原点 + 累積）へ置き換え、`positionSeconds` / `TransportReadout` / ヘッダーの印。23 テスト GREEN
+
+- 2026-11-28 Story Pane と X-Touch の PLAY / STOP / REC / << / >> を `AppState.transport` に接続。AU のホスト情報に加えて Story の再生とテイク録音を操作する。

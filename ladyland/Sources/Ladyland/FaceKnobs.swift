@@ -600,6 +600,27 @@ final class FaceKnobController {
     // 8×16 ページのマトリクス割当（2026-08-01）で CC 0-127 全域 + PB (128) が対象
     private var pickup = KnobPickup(knobCount: 129)
     private weak var slot: InstrumentSlot?
+    var onInput: ((Int, Int, Float) -> Bool)?
+
+    static func parameter(knob: Int, in slot: InstrumentSlot) -> AUParameter? {
+        slot.knobMappings.first(where: { $0.knob == knob }).flatMap { slot.parameter(at: $0.address) }
+    }
+
+    static func normalizedValue(knob: Int, in slot: InstrumentSlot) -> Float? {
+        guard let parameter = parameter(knob: knob, in: slot), parameter.maxValue > parameter.minValue else { return nil }
+        return (parameter.value - parameter.minValue) / (parameter.maxValue - parameter.minValue)
+    }
+
+    static func applyStoryValue(_ value: Float, knob: Int, in slot: InstrumentSlot) {
+        guard let parameter = parameter(knob: knob, in: slot), parameter.maxValue > parameter.minValue else { return }
+        let mapped = parameter.minValue + (parameter.maxValue - parameter.minValue) * value
+        if parameter.value != mapped { parameter.setValue(mapped, originator: nil) }
+    }
+
+    func applyStoryValue(_ value: Float, knob: Int) {
+        guard let slot else { return }
+        Self.applyStoryValue(value, knob: knob, in: slot)
+    }
 
     /// 送り先スロットを切り替える（選択切替・ロード・割当変更時）。
     /// ピックアップは必ず仕切り直す — 切替の段差吸収の要
@@ -616,12 +637,10 @@ final class FaceKnobController {
 
     /// ノブ CC を処理する（knob = CC 0-7、value127 = CC 値 0-127）
     func handle(knob: Int, value127: Int) {
-        guard let slot,
-              let mapping = slot.knobMappings.first(where: { $0.knob == knob }),
-              let param = slot.parameter(at: mapping.address)
-        else { return }
-
+        guard let slot else { return }
         let value = Double(value127) / 127.0
+        if onInput?(slot.index, knob, Float(value)) == true { return }
+        guard let param = Self.parameter(knob: knob, in: slot) else { return }
         let minValue = Double(param.minValue)
         let range = Double(param.maxValue) - minValue
         guard range > 0 else { return }

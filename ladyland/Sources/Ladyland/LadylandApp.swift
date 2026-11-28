@@ -9,6 +9,7 @@ import AppKit
 import Combine
 import Sparkle
 import SwiftUI
+import StoryKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
@@ -93,6 +94,15 @@ extension AppDelegate: @preconcurrency SPUStandardUserDriverDelegate {
 }
 
 @main
+enum LadylandEntry {
+    @MainActor
+    static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.first == "story" { StoryCLI.handle(arguments: Array(arguments.dropFirst())) }
+        LadylandApp.main()
+    }
+}
+
 struct LadylandApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
@@ -104,7 +114,10 @@ struct LadylandApp: App {
                     .environmentObject(appState)
                     .environmentObject(appDelegate)
                     .onAppear {
-                        appDelegate.prepareForTermination = { await appState.midiUse.stop() }
+                        appDelegate.prepareForTermination = {
+                            appState.storyController.stop()
+                            await appState.midiUse.stop()
+                        }
                     }
             }
         }

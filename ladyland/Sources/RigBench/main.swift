@@ -9,6 +9,7 @@
 //!   swift run RigBench <name>     # 実行
 
 import Foundation
+import StoryKit
 
 let benches: [Bench] = [
     Lpd8LedRate(),
@@ -28,9 +29,11 @@ let benches: [Bench] = [
 
 let args = Array(CommandLine.arguments.dropFirst())
 
+if args.first == "story" { StoryCLI.handle(arguments: Array(args.dropFirst())) }
+
 guard let name = args.first else {
     print("RigBench — 機材測定ベンチ集")
-    print("使い方: swift run RigBench <name>\n")
+    print("使い方: swift run RigBench <name> | story <command>\n")
     for bench in benches {
         print("  \(bench.name)  —  \(bench.summary)")
     }

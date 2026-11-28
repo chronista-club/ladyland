@@ -19,6 +19,15 @@ struct XTouchAssignmentsTests {
         for note in try #require(rec.notes) {
             #expect(XTouchMCU.decode(0x90, note, 127) == nil)
         }
-        #expect(XTouchAssignments.all.contains { $0.id == "transport" && !$0.assigned })
+    }
+
+    @Test("Transport の押下だけが Story 操作を発行する")
+    func transportButtons() throws {
+        let transport = try #require(XTouchAssignments.all.first { $0.id == "transport" })
+        #expect(transport.assigned)
+        #expect(XTouchMCU.decode(0x90, 0x5e, 127) == .transport(.play))
+        #expect(XTouchMCU.decode(0x90, 0x5f, 127) == .transport(.record))
+        #expect(XTouchMCU.decode(0x90, 0x5e, 0) == nil)
+        #expect(XTouchMCU.decode(0x80, 0x5e, 127) == nil)
     }
 }
