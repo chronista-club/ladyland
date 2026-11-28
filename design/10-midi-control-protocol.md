@@ -61,7 +61,7 @@
 
 - 2026-10-07: 「これprotocolとして纏まってると良くない？」「アプリ<->MIDIコン間連携が楽になる」を受け、使用権に加えて能力・操作・表示を共通契約として整理。配置の選択に依存する実装は保留し、既存変換層を調査。
 - 2026-10-07: 「それでいこう」、repo / crate 分割への「OK」で共通サービス方式を承認。midistage を正本、Ladyland / VP を利用側として実装開始。
-- 2026-11-27: `midistage`・`maru`・`lnx` を統合し、`lnx-server` を唯一の Signal Hub + Router にする 6 Steps を完遂（PR #62, #63）。語彙を `Gear`（`gear_id` / `GearView` / `Lnx/…` 仮想ポート）に統一し、接続先を `~/Library/Application Support/club.chronista.lnx-server/endpoint.json` に切り替え。
+- 2026-11-27: `midistage`・`maru`・`lnx` を統合し、`lnx-server` を唯一の Signal Hub + Router にする 6 Steps を完遂（PR #62, #63）。語彙を `Gear`（`gear_id` / `GearView` / `Lnx/…` 仮想ポート）に統一し、接続先を `~/Library/Application Support/tech.anycreative.lnx-server/endpoint.json` に切り替え。
 
 ### 利用側の実装（2026-10-07 / 2026-11-27 更新）
 

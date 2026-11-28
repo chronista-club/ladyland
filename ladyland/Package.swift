@@ -11,7 +11,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
-        .package(url: "https://github.com/chronista-club/lnx.git", exact: "0.2.0"),
+        .package(url: "https://github.com/chronista-club/lnx.git", exact: "0.3.0"),
         // creo-ui デザインシステム（Creo エコシステム共通の視覚言語）。
         // GitHub URL 参照はルートに Package.swift が無いため未対応 — 艦隊の
         // 「path 依存で共有」パターン（cortex ↔ lnx-gear と同型）

@@ -45,7 +45,7 @@ engine 層  64 スロット / drums / master
     機材の形・実寸・操作子の対応は機材の事実なので、`Gear/<id>.json` / `gear_build.py` /
     `nanokontrol.py` / `assets/blender/gear/<id>.blend` を `lnx`（旧 `midistage`）の `gear/<id>/`
     (`gear.json` = 意味の層、`<id>.blend` = 見た目の層。`lnx` docs/design/03-gear-and-desk.md)へ移し、ここから削除した。
-    アプリは `~/Library/Application Support/club.chronista.lnx-server/gear/` の `<id>.usdz` / `<id>.json` を優先して読み
+    アプリは `~/Library/Application Support/tech.anycreative.lnx-server/gear/` の `<id>.usdz` / `<id>.json` を優先して読み
     (`GearAssets`、無ければ従来の置き場)、studio.blend は同じ置き場の `<id>.blend` をリンクする。
     `studio_export.py` は机・棚・環境光・配置だけを書く。機材 ID は inventory に揃え `fgdp50` → `fgdp`、
     `ncxse` → `numa`(配置の旧 ID は `GearAssets.lookup` が読み替える)。以下 1e〜1i の

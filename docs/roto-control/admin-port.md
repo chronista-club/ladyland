@@ -13,7 +13,7 @@ Ladyland 本体は開かない。以下のバイト仕様と旧ベンチはプ�
 
 - 配置順序は **常駐 `lnx-server` を `ApplyGearSetup` 実装を含む版（`v0.2.0` 以降）へ更新・再起動 → Ladyland を更新・再起動**。
   旧 daemon は `setup_owners` / 登録 API が無いため ROTO を使えない。更新・再起動は lead が担当する。
-- 台帳は `lnx-server` の `~/Library/Application Support/club.chronista.lnx-server/settings.json`。Ladyland は起動・再接続時に `SetGearSetups` で席 0–3 を登録する。
+- 台帳は `lnx-server` の `~/Library/Application Support/tech.anycreative.lnx-server/settings.json`。Ladyland は起動・再接続時に `SetGearSetups` で席 0–3 を登録する。
   席 4・5 の旧配置掃除は廃止する。VP の席 8（ROTO 画面の SETUP 09）にも触れない。
   内部の setup 番号は 0 始まり、ROTO 画面の SETUP 番号は 1 始まりで、表示は内部番号 + 1 となる。
 - 長押しで INST 冊へ移るときは `SelectSetup(gear_id, lease_token, setup: 2)` を使う。

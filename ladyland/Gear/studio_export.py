@@ -217,7 +217,7 @@ def export_assets(source, output, bake=True):
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     layout = layout_from_scene(scene)
-    # 機材は lnx の配布物（~/Library/Application Support/club.chronista.lnx-server/gear/<id>.blend）を
+    # 機材は lnx の配布物（~/Library/Application Support/tech.anycreative.lnx-server/gear/<id>.blend）を
     # リンクする。機材の USDZ / JSON は lnx の build.py が書くので、ここでは書き出さない
     for instance in gear_instances(scene):
         library = instance.instance_collection.library
